@@ -1,7 +1,7 @@
 import * as dotenv from 'dotenv';
 import { join } from 'path';
 
-const envFile = process.env.NODE_ENV === 'production' ? 'prod.env' : 'dev.env';
+const envFile = process.env.NODE_ENV === 'production' ? 'production.env' : 'development.env';
 const path = join('environments', envFile);
 dotenv.config({ path });
 
