@@ -20,7 +20,7 @@ class FastifyServer {
     start() {
         this.handleRoutes();
         this.handleRpcConnection();
-        this.server.listen(this.port)
+        this.server.listen(this.port, '0.0.0.0')
             .then(() => console.log(`Server Started On Port ${this.port}`))
             .catch((error) => this.stop(error.message));
     }
