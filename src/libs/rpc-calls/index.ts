@@ -53,7 +53,7 @@ export class RpcClient {
                     const { statusCode } = response;
                     try {
                         if (statusCode === 401) return res({ error: 'Unauthorized', statusCode, IECode: 4 });
-                        if (statusCode !== 200) return res({ error: 'Undefined Error', statusCode, IECode: 5 })
+                        // if (statusCode !== 200) return res({ error: 'Undefined Error', statusCode, IECode: 5 })
                         const decRes = JSON.parse(buffer);
                         decRes.hasOwnProperty('error') && decRes.error !== null
                             ? res({
@@ -63,7 +63,7 @@ export class RpcClient {
                                 EECode: decRes.error.code || 0,
                             })
                             : decRes.hasOwnProperty('result')
-                                ? res({ data: decRes.result, statusCode})
+                                ? res({ data: decRes.result, statusCode })
                                 : res({
                                     error: decRes.error?.message || 'Undefined Error',
                                     statusCode,
@@ -74,7 +74,7 @@ export class RpcClient {
                     } catch (error) {
                         statusCode !== 200
                             ? res({ error: error.message, statusCode })
-                            : res({error: error.message, statusCode, IECode: 1 });
+                            : res({ error: error.message, statusCode, IECode: 1 });
                     }
                 });
               });
