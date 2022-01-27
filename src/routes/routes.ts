@@ -1,12 +1,13 @@
 import { FastifyInstance } from "fastify";
 import { addressRoute } from "./address.route";
+import { chainRoute } from "./chain.route";
 import { tokenRoute } from "./token.route";
 import { txRoute } from "./tx.route";
 
 export const handleRoutes = (server: FastifyInstance) => {
-    server.register(require('fastify-cors'))
+    server.register(require('fastify-cors'));
     server.register(addressRoute, { prefix: '/address' });
     server.register(txRoute, { prefix: '/tx' });
     server.register(tokenRoute, { prefix: '/token' });
-
+    server.register(chainRoute, { prefix: '/chain' });
 }
