@@ -42,6 +42,6 @@ class FastifyServer {
 
 
 const port = envConfig.SERVER_PORT;
-const options: FastifyServerOptions = {};
+const options: FastifyServerOptions = { logger: true };
 const myServer = new FastifyServer(port, options);
 myServer.start();
