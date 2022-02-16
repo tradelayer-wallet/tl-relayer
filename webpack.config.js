@@ -27,7 +27,9 @@ module.exports = (env, argv) => {
     },
     externals: [
       'long',
-      'pino-pretty'
+      'pino-pretty',
+      'bufferutil',
+      'utf-8-validate',
     ],
     optimization: {
       minimizer: [

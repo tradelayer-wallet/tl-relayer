@@ -7,6 +7,7 @@ dotenv.config({ path });
 
 export const envConfig: {
     SERVER_PORT: number;
+    SOCKET_PORT: number;
     NETWORK: string;
     RPC_USER: string;
     RPC_PASS: string;
@@ -14,6 +15,7 @@ export const envConfig: {
     RPC_PORT: number;
 } = {
     SERVER_PORT: parseInt(process.env.SERVER_PORT),
+    SOCKET_PORT: parseInt(process.env.SOCKET_PORT),
     NETWORK: process.env.NETWORK,
     RPC_USER: process.env.RPC_USER,
     RPC_PASS: process.env.RPC_PASS,

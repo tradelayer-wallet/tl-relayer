@@ -2,6 +2,7 @@ import Fastify, { FastifyInstance, FastifyServerOptions } from 'fastify';
 import { handleRoutes } from './routes/routes';
 import { handleRpcConenction } from './config/rpc.config';
 import { envConfig } from './config/env.config';
+import { initSocketConnection } from './services/socket.service';
 
 class FastifyServer {
     private _server: FastifyInstance;
@@ -20,6 +21,7 @@ class FastifyServer {
     start() {
         this.handleRoutes();
         this.handleRpcConnection();
+        this.handleSockets()
         this.server.listen(this.port, '0.0.0.0')
             .then(() => console.log(`Server Started On Port ${this.port}`))
             .catch((error) => this.stop(error.message));
@@ -30,9 +32,14 @@ class FastifyServer {
         process.exit(1);
     }
 
+    private handleSockets() {
+        initSocketConnection(this.server)
+    }
+
     private handleRoutes() {
         handleRoutes(this.server);
     }
+
     private async handleRpcConnection() {
         const connected = await handleRpcConenction();
         const message = connected ? `RPC Connected` : `ERROR: RPC connection fails`;
