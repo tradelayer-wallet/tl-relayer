@@ -3,6 +3,11 @@ import { Socket, Server } from "socket.io";
 import { envConfig } from "../config/env.config";
 import { rpcClient } from "../config/rpc.config";
 
+const reqVersions = {
+    nodeVersion: '0.0.3',
+    walletVersion: '0.0.3',
+};
+
 export let walletSocketSevice: SocketService;
 
 export const initSocketConnection = (app: FastifyInstance) => {
@@ -26,6 +31,22 @@ export class SocketService {
         this.startBlockCounting();
         this.io.on('connection', (socket) => {
             console.log(`New Connection: ${socket.id}`);
+
+            socket.on('check-versions', (versions) => {
+                const formatVersions = (stringVersion: string) => parseFloat(stringVersion.split('.').join(''));
+                const reqWalletVersion = formatVersions(reqVersions.walletVersion)
+                const reqNodeVersion = formatVersions(reqVersions.nodeVersion);
+    
+                const walletVersion = formatVersions(versions.walletVersion);
+                const nodeVersion = formatVersions(versions.nodeVersion);
+                const valid = reqWalletVersion <= walletVersion && reqNodeVersion <= nodeVersion;
+                socket.emit('version-guard', valid);
+                if (!valid) socket.disconnect();
+            });
+
+            socket.on('disconnect', () => {
+                console.log(`Disconnected: ${socket.id}`);
+            })
         });
     }
 
