@@ -4,8 +4,8 @@ import { envConfig } from "../config/env.config";
 import { rpcClient } from "../config/rpc.config";
 
 const reqVersions = {
-    nodeVersion: '0.0.3',
-    walletVersion: '0.0.3',
+    nodeVersion: '0.0.6',
+    walletVersion: '0.0.6',
 };
 
 export let walletSocketSevice: SocketService;
