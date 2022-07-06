@@ -29,7 +29,8 @@ export const rpcRoutes = (fastify: FastifyInstance, opts: any, done: any) => {
                 reply.send({ error: `${method} Method is not allowed` });
                 return;
             } else {
-                const res = await rpcClient.call(method, ...params);
+                const _params = params?.length ? params : [];
+                const res = await rpcClient.call(method, ..._params);
                 reply.send(res);
                 return;
             }
