@@ -10,6 +10,7 @@ const allowedMethods = [
     // 'tl_isaddresswinner',
     'tl_getbalance',
     'sendrawtransaction',
+    'tl_getinfo'
 ];
 
 export const rpcRoutes = (fastify: FastifyInstance, opts: any, done: any) => {
@@ -25,7 +26,7 @@ export const rpcRoutes = (fastify: FastifyInstance, opts: any, done: any) => {
             }
 
             if (!allowedMethods.includes(method)) {
-                reply.send({ error: `${method} Method is now allowed` });
+                reply.send({ error: `${method} Method is not allowed` });
                 return;
             } else {
                 const res = await rpcClient.call(method, ...params);
