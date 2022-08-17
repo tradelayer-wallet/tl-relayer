@@ -6,11 +6,15 @@ const allowedMethods = [
     'tl_getallbalancesforaddress',
     'tl_getproperty',
     'tl_list_attestation',
-    // 'tl_listnodereward_addresses',
-    // 'tl_isaddresswinner',
     'tl_getbalance',
+    'tl_getinfo',
+    'tl_createrawtx_opreturn',
+    'tl_createrawtx_reference',
+    'createrawtransaction',
     'sendrawtransaction',
-    'tl_getinfo'
+    'decoderawtransaction',
+    'validateaddress',
+    'sendrawtransaction',
 ];
 
 export const rpcRoutes = (fastify: FastifyInstance, opts: any, done: any) => {
