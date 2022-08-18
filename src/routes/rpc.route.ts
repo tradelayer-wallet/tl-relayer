@@ -10,6 +10,8 @@ const allowedMethods = [
     'tl_getinfo',
     'tl_createrawtx_opreturn',
     'tl_createrawtx_reference',
+    'tl_check_kyc',
+    'tl_createpayload_simplesend',
     'createrawtransaction',
     'sendrawtransaction',
     'decoderawtransaction',
