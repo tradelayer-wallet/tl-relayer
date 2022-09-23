@@ -11,12 +11,20 @@ const allowedMethods = [
     'tl_createrawtx_opreturn',
     'tl_createrawtx_reference',
     'tl_check_kyc',
+    'tl_check_commits',
+    //
+    'tl_createpayload_commit_tochannel',
+    'tl_createpayload_withdrawal_fromchannel',
     'tl_createpayload_simplesend',
+    'tl_createpayload_attestation',
+    'tl_createpayload_instant_ltc_trade',
+    //
     'createrawtransaction',
     'sendrawtransaction',
     'decoderawtransaction',
     'validateaddress',
     'sendrawtransaction',
+    'addmultisigaddress',
 ];
 
 export const rpcRoutes = (fastify: FastifyInstance, opts: any, done: any) => {

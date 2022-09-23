@@ -1,5 +1,5 @@
 import { FastifyInstance } from "fastify";
-import { getAddressBalance, validateAddress } from "../services/address.service";
+import { fundAddress, getAddressBalance, validateAddress } from "../services/address.service";
 
 export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => {
     fastify.get('/validate/:address', async (request, reply) => {
@@ -16,6 +16,16 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
         try {
             const { address } = request.params as { address: string };
             const res = await getAddressBalance(address);
+            reply.send(res);
+        } catch (error) {
+            reply.send({ error: error.message });
+        }
+    });
+
+    fastify.get('/faucet/:address', async (request, reply) => {
+        try {
+            const { address } = request.params as { address: string };
+            const res = await fundAddress(address);
             reply.send(res);
         } catch (error) {
             reply.send({ error: error.message });
