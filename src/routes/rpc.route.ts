@@ -18,6 +18,8 @@ const allowedMethods = [
     'tl_createpayload_simplesend',
     'tl_createpayload_attestation',
     'tl_createpayload_instant_ltc_trade',
+    'tl_createpayload_instant_trade',
+    'tl_createpayload_contract_instant_trade',
     //
     'createrawtransaction',
     'sendrawtransaction',
