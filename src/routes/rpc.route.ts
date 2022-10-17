@@ -1,5 +1,6 @@
 import { FastifyInstance } from "fastify";
 import { rpcClient } from "../config/rpc.config"
+import { getAttestationPayload } from "../services/address.service";
 import { listunspent } from "../services/sochain.service";
 
 const allowedMethods = [
@@ -37,6 +38,12 @@ export const rpcRoutes = (fastify: FastifyInstance, opts: any, done: any) => {
 
             if (method === 'listunspent') {
                 const res = await listunspent(fastify, params);
+                reply.send(res);
+                return;
+            }
+
+            if (method === 'tl_createpayload_attestation') {
+                const res = await getAttestationPayload(request.ip, fastify);
                 reply.send(res);
                 return;
             }
