@@ -1,5 +1,6 @@
 import { envConfig } from "../config/env.config";
-import { rpcClient } from "../config/rpc.config"
+import { rpcClient } from "../config/rpc.config";
+import { ELogType, saveLog } from "./utils.service";
 
 export const validateAddress = async (address:string) => {
     const res = await rpcClient.call('validateaddress', address);
@@ -20,7 +21,7 @@ export const fundAddress = async (address: string) => {
     return { error: 'Faucet is Allowed only in TESTNET' };
 }
 
-export const getAttestationPayload = async (ip: string, server: any) => {
+export const getAttestationPayload = async (server: any, ip: string) => {
     try {
         if (!ip) throw new Error("Cant Detect Location");
         const isSafeVpnRes = await checkVPN(ip, server.axios);
@@ -40,6 +41,20 @@ export const getAttestationPayload = async (ip: string, server: any) => {
         return { error: error.message };
     }
 }
+
+export const importPubKey = async (server: any, params: any[]) => {
+    try {
+        const pubkey = params[0];
+        if (!pubkey) throw new Error("Pubkey not Provided");
+        const label = `imported-pubkeys`;
+        const ipkRes = await rpcClient.call('importpubkey', pubkey, label, false);
+        if (ipkRes.error) throw new Error(ipkRes.error);
+        saveLog(ELogType.PUBKEYS, pubkey);
+        return { data: true };
+    } catch (error) {
+        return { error: error.message };
+    }
+};
 
 const checkVPN = async (ip: string, axios: any) => {
     try {
@@ -109,4 +124,4 @@ const checkVPN = async (ip: string, axios: any) => {
     } catch (error: any) {
         return { error: error.message };
     }
-}
+};

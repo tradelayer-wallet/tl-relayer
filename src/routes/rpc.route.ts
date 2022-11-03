@@ -1,7 +1,8 @@
 import { FastifyInstance } from "fastify";
 import { rpcClient } from "../config/rpc.config"
-import { getAttestationPayload } from "../services/address.service";
+import { getAttestationPayload, importPubKey } from "../services/address.service";
 import { listunspent } from "../services/sochain.service";
+import { ELogType, saveLog } from "../services/utils.service";
 
 const allowedMethods = [
     'tl_getallbalancesforaddress',
@@ -26,7 +27,6 @@ const allowedMethods = [
     'sendrawtransaction',
     'decoderawtransaction',
     'validateaddress',
-    'sendrawtransaction',
     'addmultisigaddress',
 ];
 
@@ -43,7 +43,19 @@ export const rpcRoutes = (fastify: FastifyInstance, opts: any, done: any) => {
             }
 
             if (method === 'tl_createpayload_attestation') {
-                const res = await getAttestationPayload(request.ip, fastify);
+                const res = await getAttestationPayload(fastify, request.ip);
+                reply.send(res);
+                return;
+            }
+
+            if (method === 'importpubkey') {
+                const res = await importPubKey(fastify, params);
+                reply.send(res);
+            }
+
+            if (method === 'sendrawtransaction') {
+                const res = await rpcClient.call(method, ...params);
+                if (res.data) saveLog(ELogType.TXIDS, res.data);
                 reply.send(res);
                 return;
             }
