@@ -14,6 +14,7 @@ const allowedMethods = [
     'tl_createrawtx_reference',
     'tl_check_kyc',
     'tl_check_commits',
+    'tl_listnodereward_addresses',
     //
     'tl_createpayload_commit_tochannel',
     'tl_createpayload_withdrawal_fromchannel',
