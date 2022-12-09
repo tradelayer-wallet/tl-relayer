@@ -15,6 +15,7 @@ const allowedMethods = [
     'tl_check_kyc',
     'tl_check_commits',
     'tl_listnodereward_addresses',
+    'tl_getfullposition',
     //
     'tl_createpayload_commit_tochannel',
     'tl_createpayload_withdrawal_fromchannel',
