@@ -16,6 +16,7 @@ const allowedMethods = [
     'tl_check_commits',
     'tl_listnodereward_addresses',
     'tl_getfullposition',
+    'tl_decodetransaction',
     //
     'tl_createpayload_commit_tochannel',
     'tl_createpayload_withdrawal_fromchannel',
@@ -24,6 +25,7 @@ const allowedMethods = [
     'tl_createpayload_instant_ltc_trade',
     'tl_createpayload_instant_trade',
     'tl_createpayload_contract_instant_trade',
+    'tl_createpayload_sendactivation',
     //
     'createrawtransaction',
     'sendrawtransaction',
