@@ -1,6 +1,7 @@
 import Fastify, { FastifyInstance, FastifyServerOptions } from 'fastify';
-import fs from 'fs';
-import path from 'path';
+import * as fs from 'fs';
+import * as path from 'path';
+
 import { handleRoutes } from './routes/routes';
 import { handleRpcConenction } from './config/rpc.config';
 import { envConfig } from './config/env.config';
