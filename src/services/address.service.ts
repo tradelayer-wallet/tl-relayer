@@ -1,16 +1,26 @@
 import { envConfig } from "../config/env.config";
 import { rpcClient } from "../config/rpc.config";
 import { ELogType, saveLog } from "./utils.service";
+import axios from 'axios';
+
+const BASE_URL = 'http://localhost:3000'; // Your Express server base URL
+
 
 export const validateAddress = async (address:string) => {
     const res = await rpcClient.call('validateaddress', address);
     return res;
 }
 
-export const getAddressBalance = async (address: string) => {
-    const res = await rpcClient.call('tl_getallbalancesforaddress', address);
-    return res;
-}
+export const getAddressBalance = async (address) => {
+  try {
+    const res = await axios.post(`${BASE_URL}/tl_getAllBalancesForAddress`, { params: address });
+    return res.data;
+  } catch (error) {
+    console.error('Error in getAddressBalance:', error);
+    throw error;
+  }
+};
+
 
 export const fundAddress = async (address: string) => {
     const network = envConfig.NETWORK;
