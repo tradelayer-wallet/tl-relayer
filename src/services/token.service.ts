@@ -1,11 +1,26 @@
 import { rpcClient } from "../config/rpc.config"
 
-export const getTokenInfo = async (propid: number) => {
-    const res = await rpcClient.call('tl_getproperty', propid);
-    return res;
-}
+import axios from 'axios';
+
+const BASE_URL = 'http://localhost:3000'; // Your Express server base URL
+
+
+export const getTokenInfo = async (propid) => {
+  try {
+    const res = await axios.post(`${BASE_URL}/tl_getProperty`, { params: propid });
+    return res.data;
+  } catch (error) {
+    console.error('Error in getTokenInfo:', error);
+    throw error;
+  }
+};
 
 export const listTokens = async () => {
-    const res = await rpcClient.call('tl_listproperties');
-    return res;
-}
+  try {
+    const res = await axios.post(`${BASE_URL}/tl_listProperties`);
+    return res.data;
+  } catch (error) {
+    console.error('Error in listTokens:', error);
+    throw error;
+  }
+};
