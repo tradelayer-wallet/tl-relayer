@@ -18,14 +18,14 @@ class FastifyServer {
     }
 
     private get server() {
-        return this._server
+        return this._server;
     }
 
     start() {
         this.handleRoutes();
         this.handleRpcConnection();
-        // this.handleSockets()
-        this.server.listen(this.port, '0.0.0.0')
+        // this.handleSockets();
+        this.server.listen({ port: this.port, host: '0.0.0.0' })
             .then(() => console.log(`Server Started On Port ${this.port} with SSL`))
             .catch((error) => this.stop(error.message));
     }
@@ -36,7 +36,7 @@ class FastifyServer {
     }
 
     private handleSockets() {
-        initSocketConnection(this.server)
+        initSocketConnection(this.server);
     }
 
     private handleRoutes() {
@@ -55,10 +55,13 @@ const sslOptions = {
     cert: fs.readFileSync(path.join(__dirname, '../ssl/fullchain.pem')),
 };
 
+const httpsServer = https.createServer(sslOptions);
+
 const port = envConfig.SERVER_PORT;
-const options: FastifyServerOptions = { 
-    logger: true, 
-    https: sslOptions 
+const options: FastifyServerOptions = {
+    logger: true,
+    serverFactory: (handler) => httpsServer.on('request', handler),
 };
+
 const myServer = new FastifyServer(port, options);
 myServer.start();
