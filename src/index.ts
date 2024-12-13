@@ -1,7 +1,7 @@
 import Fastify, { FastifyInstance, FastifyServerOptions } from 'fastify';
 import * as fs from 'fs';
 import * as path from 'path';
-import https from 'https';
+import * as https from 'https';
 import { handleRoutes } from './routes/routes';
 import { handleRpcConenction } from './config/rpc.config';
 import { envConfig } from './config/env.config';
