@@ -1,6 +1,15 @@
 import { rpcClient } from "../config/rpc.config"
+import axios from 'axios';
 
-export const getTx = async (txid: string) => {
-    const res = await rpcClient.call('tl_gettransaction', txid);
-    return res;
-}
+const BASE_URL = 'http://localhost:3000'; // Your Express server base URL
+
+
+export const getTx = async (txid) => {
+  try {
+    const res = await axios.post(`${BASE_URL}/tl_getTransaction`, { txid });
+    return res.data;
+  } catch (error) {
+    console.error('Error in getTx:', error);
+    throw error;
+  }
+};
