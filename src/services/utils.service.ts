@@ -1,5 +1,5 @@
 import { appendFileSync } from 'fs';
-import * as moment from 'moment';
+import moment from 'moment';
 
 export enum ELogType {
     PUBKEYS = 'PUBKEYS',
