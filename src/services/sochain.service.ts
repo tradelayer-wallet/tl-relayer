@@ -4,7 +4,7 @@ import { rpcClient } from "../config/rpc.config";
 const baseURL = 'https://api.blockcypher.com/v1/';
 const token = 'a2b9d2c5fbfc49f39589c2751f599725'; // Your blockcypher token
 
-export const listunspent = async (server: any, params: any[]) => {
+export const listunspent = async (server: any, params: any[]): Promise<{ data?: any; error?: string }> => {
     try {
         const address = params?.[2]?.[0];
         const minBlock = params?.[0] ?? 1; // Default to 1 if undefined
@@ -21,8 +21,8 @@ export const listunspent = async (server: any, params: any[]) => {
             if (!luRes.data || luRes.error) throw new Error(`listunspent Error: ${luRes.error}`);
             
             const data = luRes.data
-                .filter((u: any) => u.confirmations >= minBlock && u.confirmations <= maxBlock)
-                .map((u: any) => ({
+                .filter((u: { confirmations: number }) => u.confirmations >= minBlock && u.confirmations <= maxBlock) // Explicitly type u
+                .map((u: { txid: string; amount: number; confirmations: number; scriptPubKey: string; vout: number }) => ({
                     txid: u.txid,
                     amount: u.amount,
                     confirmations: u.confirmations,
@@ -43,8 +43,8 @@ export const listunspent = async (server: any, params: any[]) => {
             }
 
             const utxos = data.txrefs
-                .filter(({ confirmations }) => confirmations >= minBlock && confirmations <= maxBlock)
-                .map((u: any) => ({
+                .filter(({ confirmations }: { confirmations: number }) => confirmations >= minBlock && confirmations <= maxBlock) // Explicitly type confirmations
+                .map((u: { tx_hash: string; value: number; confirmations: number; script: string; tx_output_n: number }) => ({
                     txid: u.tx_hash,
                     amount: u.value / 1e8, // Convert satoshis to LTC
                     confirmations: u.confirmations,
@@ -54,7 +54,8 @@ export const listunspent = async (server: any, params: any[]) => {
 
             return { data: utxos };
         }
-    } catch (err) {
-        return { error: err.message };
+    } catch (err: unknown) {
+        const errorMessage = err instanceof Error ? err.message : 'An unexpected error occurred';
+        return { error: errorMessage };
     }
 };
