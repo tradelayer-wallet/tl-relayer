@@ -208,5 +208,60 @@ export const Encode = {
         return `${marker}${type.toString(36)}${payload.join(',')}`;
     },
 
+encodeTradeTokensChannel (params: {
+    propertyId1: number;
+    propertyId2: number;
+    amountOffered1: number;
+    amountDesired2: number;
+    columnAIsOfferer: number;
+    expiryBlock: number;
+}): string => {
+    const payload = [
+        params.propertyId1.toString(36),
+        params.propertyId2.toString(36),
+        new BigNumber(params.amountOffered1).times(1e8).toString(36), // Updated to use BigNumber
+        new BigNumber(params.amountDesired2).times(1e8).toString(36), // Updated to use BigNumber
+        params.columnAIsOfferer ? '1' : '0',
+        params.expiryBlock.toString(36),
+    ];
+    const txNumber = 20;
+    const txNumber36 = txNumber.toString(36);
+    const payloadString = payload.join(',');
+    return marker + txNumber36 + payloadString;
+},
+// Encode Transfer Transaction 
+encodeTransfer (params:{
+    propertyId: number;
+    amount: number;
+    isColumnA: boolean;
+    destinationAddr: string;
+    ref?: number; // New optional parameter for reference output
+}): string => {
+    const propertyId = params.propertyId.toString(36);
+    const amounts = new BigNumber(params.amount).times(1e8).toString(36);
+    const isColumnA = params.isColumnA ? 1 : 0;
+    const destinationAddr = params.destinationAddr.length > 42 ? `ref:${params.ref || 0}` : params.destinationAddr; // Handle long multisig addresses
+    
+    return [propertyId, amounts, isColumnA, destinationAddr].join(',');
+},
+
+encodeAttestation (params: {
+  revoke: number;
+  id: number;
+  targetAddress: string;
+  metaData: string; // Usually a country code or similar metadata
+}): string => {
+  const payload = [
+    params.revoke.toString(36),      // Revoke flag (0 or 1)
+    params.id.toString(36),         // ID (usually 0 for whitelist)
+    params.targetAddress,           // Address being attested
+    params.metaData                 // Metadata such as the country code
+  ];
+  const txNumber = 9; // Assuming attestation transaction is type 9
+  const txNumber36 = txNumber.toString(36);
+  const payloadString = payload.join(',');
+  return marker + txNumber36 + payloadString;
+}
+    
     // Add all remaining methods similarly...
 };
