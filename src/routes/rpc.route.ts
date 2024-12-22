@@ -65,7 +65,7 @@ export const rpcRoutes = (fastify: FastifyInstance, opts: any, done: any) => {
                         const payload = Encode[encoderType](params);
                         reply.send({ payload });
                         return;
-                    } catch (encodingError) {
+                    } catch (error: unknown) {
                         reply.status(500).send({ error: `Error encoding payload: ${encodingError.message}` });
                         return;
                     }
