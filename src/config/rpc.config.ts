@@ -15,5 +15,5 @@ export const handleRpcConenction = async () => {
     console.log('rpc client options ' +JSON.stringify(options))
     const res = await rpcClient.call('getblockchaininfo');
     console.log('res '+JSON.stringify(res))
-    return res.data?.blocktime ? true : false;
+    return res.data?.blocks ? true : false;
 }
