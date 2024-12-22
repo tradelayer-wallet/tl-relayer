@@ -10,5 +10,7 @@
     "esModuleInterop": true,  // Ensures compatibility with ES module imports
     "strict": true            // Enables strict type checking (optional but recommended)
   },
-  "include": ["./src/**/*", "./services/txEncoder.js"]
+  "include": ["./src/**/*"],
+  "exclude": ["./services/txEncoder.js"]
+
 }
