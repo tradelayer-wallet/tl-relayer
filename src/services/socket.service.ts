@@ -23,7 +23,6 @@ export class SocketService {
         const socketOptions = { cors: { origin: "*", methods: ["GET", "POST"] } };
         this.io = new Server(envConfig.SOCKET_PORT, socketOptions);
         this.handleEvents();
-
     }
 
     private handleEvents() {
@@ -33,20 +32,23 @@ export class SocketService {
             console.log(`New Connection: ${socket.id}`);
 
             socket.on('check-versions', (versions) => {
-                const formatVersions = (stringVersion: string) => parseFloat(stringVersion.split('.').join(''));
-                const reqWalletVersion = formatVersions(reqVersions.walletVersion)
+                const formatVersions = (stringVersion: string) =>
+                    parseFloat(stringVersion.split('.').join(''));
+                const reqWalletVersion = formatVersions(reqVersions.walletVersion);
                 const reqNodeVersion = formatVersions(reqVersions.nodeVersion);
-    
+
                 const walletVersion = formatVersions(versions.walletVersion);
                 const nodeVersion = formatVersions(versions.nodeVersion);
-                const valid = reqWalletVersion <= walletVersion && reqNodeVersion <= nodeVersion;
+                const valid =
+                    reqWalletVersion <= walletVersion &&
+                    reqNodeVersion <= nodeVersion;
                 socket.emit('version-guard', valid);
                 if (!valid) socket.disconnect();
             });
 
             socket.on('disconnect', () => {
                 console.log(`Disconnected: ${socket.id}`);
-            })
+            });
         });
     }
 
@@ -59,29 +61,29 @@ export class SocketService {
 
     startBlockCounting() {
         if (this.blockCountingInterval) return;
-             this.blockCountingInterval = setInterval(async () => {
-                if (!rpcClient) return;
-                const bbhRes = await rpcClient.call('getbestblockhash');
-                if (bbhRes.error || !bbhRes.data) {
-                    this.onTimeOutMessage(bbhRes.error);
-                    return null;
-                }
-                const bbRes = await rpcClient.call('getblock', bbhRes.data);
-                if (bbRes.error || !bbRes.data) {
-                    this.onTimeOutMessage(bbhRes.error);
-                    return null;
-                };
-                const height = bbRes.data.height;
-                if (this.lastBlock < height) {
-                    this.lastBlock = height;
-                    console.log(`New Block: ${height}`)
-                    this.io.emit('newBlock', height);
-                }
-            }, 2500);
+        this.blockCountingInterval = setInterval(async () => {
+            if (!rpcClient) return;
+            const bbhRes = await rpcClient.call('getbestblockhash');
+            if (bbhRes.error || !bbhRes.data) {
+                this.onTimeOutMessage(bbhRes.error || 'Unknown error');
+                return null;
+            }
+            const bbRes = await rpcClient.call('getblock', bbhRes.data);
+            if (bbRes.error || !bbRes.data) {
+                this.onTimeOutMessage(bbRes.error || 'Unknown error');
+                return null;
+            }
+            const height = bbRes.data.height;
+            if (this.lastBlock < height) {
+                this.lastBlock = height;
+                console.log(`New Block: ${height}`);
+                this.io.emit('newBlock', height);
+            }
+        }, 2500);
     }
 
     async onTimeOutMessage(message: string) {
-        if (message && message.includes('ECONNREFUSED')) {
+        if (message.includes('ECONNREFUSED')) {
             const check = await rpcClient.call('tl_getinfo');
             if (check.error || !check.data) {
                 this.io.emit('rpc-connection-error');
