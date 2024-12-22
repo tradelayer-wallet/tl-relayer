@@ -71,11 +71,12 @@ export class RpcClient {
                                     EECode: decRes.error?.code || 0,
                                 });
 
-                    } catch (error) {
-                        statusCode !== 200
-                            ? res({ error: error.message, statusCode })
-                            : res({ error: error.message, statusCode, IECode: 1 });
-                    }
+                    } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    statusCode !== 200
+        ? res({ error: errorMessage, statusCode })
+        : res({ error: errorMessage, statusCode, IECode: 1 });
+}
                 });
               });
 
