@@ -7,7 +7,9 @@
     "build": "webpack --mode=development",
     "build:watch": "webpack -w --mode=development",
     "start": "node ./dist/index.js",
-    "start:watch": "nodemon ./dist/index.js"
+    "start:watch": "nodemon ./dist/index.js",
+    "build": "NODE_OPTIONS=--openssl-legacy-provider webpack --mode=development",
+    "build:prod": "NODE_OPTIONS=--openssl-legacy-provider webpack --mode=production"
   },
   "author": "Valentin Peshev",
   "license": "ISC",
