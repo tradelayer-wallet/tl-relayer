@@ -4,7 +4,7 @@ import { rpcClient } from "../config/rpc.config";
 import { getAttestationPayload, importPubKey } from "../services/address.service";
 import { listunspent } from "../services/sochain.service";
 import { ELogType, saveLog } from "../services/utils.service";
-import Encode from "../services/txEncoder"; // Adjust the path based on where you save the Encoder file
+import { Encode } from "../services/txEncoder";
 
 const allowedMethods = [
     'tl_initmain',
