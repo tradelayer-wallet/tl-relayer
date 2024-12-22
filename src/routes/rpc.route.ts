@@ -1,10 +1,10 @@
 import { FastifyInstance } from "fastify";
 import axios from "axios";
 import { rpcClient } from "../config/rpc.config";
-import { getAttestationPayload, importPubKey } from "../services/address.service";
+import { importPubKey } from "../services/address.service";
 import { listunspent } from "../services/sochain.service";
 import { ELogType, saveLog } from "../services/utils.service";
-import { Encode } from "../services/txEncoder";
+import { Encode } from "../services/txEncoder"; // Correct import for Encode
 
 const allowedMethods = [
     'tl_initmain',
@@ -49,12 +49,13 @@ const allowedMethods = [
 export const rpcRoutes = (fastify: FastifyInstance, opts: any, done: any) => {
     fastify.post('/:method', async (request, reply) => {
         try {
-            const { params } = request.body as { params: any[] };
+            // Extract parameters and method from the request
+            const { params } = request.body as { params: { type?: string; [key: string]: any } };
             const { method } = request.params as { method: string };
 
-             // If the method is 'payload', handle encoding
+            // If the method is 'payload', handle encoding
             if (method === 'payload') {
-                if (const { params } = request.body as { params: { type?: string; [key: string]: any } };) {
+                if (!params?.type) {
                     reply.status(400).send({ error: `Missing 'type' parameter in payload request.` });
                     return;
                 }
@@ -65,8 +66,9 @@ export const rpcRoutes = (fastify: FastifyInstance, opts: any, done: any) => {
                         const payload = Encode[encoderType](params);
                         reply.send({ payload });
                         return;
-                    } catch (error: unknown) {
-                        reply.status(500).send({ error: `Error encoding payload: ${encodingError.message}` });
+                    } catch (encodingError: unknown) {
+                        const errorMessage = encodingError instanceof Error ? encodingError.message : 'Unknown error';
+                        reply.status(500).send({ error: `Error encoding payload: ${errorMessage}` });
                         return;
                     }
                 } else {
@@ -74,7 +76,7 @@ export const rpcRoutes = (fastify: FastifyInstance, opts: any, done: any) => {
                     return;
                 }
             }
-            
+
             // Forward "tl_" prefixed methods to localhost:3000
             if (method.startsWith("tl_")) {
                 try {
@@ -82,21 +84,16 @@ export const rpcRoutes = (fastify: FastifyInstance, opts: any, done: any) => {
                     reply.send(response.data);
                     return;
                 } catch (axiosError: unknown) {
-                    console.error(`Error forwarding ${method}:`, axiosError);
-                    reply.status(500).send({ error: `Error forwarding ${method}: ${axiosError.message}` });
+                    const errorMessage = axiosError instanceof Error ? axiosError.message : 'Unknown error';
+                    console.error(`Error forwarding ${method}:`, errorMessage);
+                    reply.status(500).send({ error: `Error forwarding ${method}: ${errorMessage}` });
                     return;
                 }
             }
 
-            // Handle specific methods locally
+            // Other specific methods
             if (method === "listunspent") {
                 const res = await listunspent(fastify, params);
-                reply.send(res);
-                return;
-            }
-
-            if (method === "tl_createpayload_attestation") {
-                const res = await getAttestationPayload(fastify, request.ip);
                 reply.send(res);
                 return;
             }
@@ -114,19 +111,19 @@ export const rpcRoutes = (fastify: FastifyInstance, opts: any, done: any) => {
                 return;
             }
 
-            // Check if method is allowed
+            // Default RPC client call
             if (!allowedMethods.includes(method)) {
                 reply.status(400).send({ error: `${method} Method is not allowed` });
                 return;
             }
 
-            // Default RPC client call
             const _params = params?.length ? params : [];
             const res = await rpcClient.call(method, ..._params);
             reply.send(res);
-        } catch (error) {
-            console.error(`Error in RPC route for method ${request.params.method}:`, error);
-            reply.status(500).send({ error: error.message });
+        } catch (error: unknown) {
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            console.error(`Error in RPC route for method ${request.params.method}:`, errorMessage);
+            reply.status(500).send({ error: errorMessage });
         }
     });
 
