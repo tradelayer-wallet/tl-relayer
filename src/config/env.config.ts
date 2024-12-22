@@ -20,5 +20,5 @@ export const envConfig: {
     RPC_USER: process.env.RPC_USER || 'user', // Provide a default placeholder
     RPC_PASS: process.env.RPC_PASS || 'pass', // Provide a default placeholder
     RPC_HOST: process.env.RPC_HOST || 'localhost', // Default to 'localhost' if not set
-    RPC_PORT: parseInt(process.env.RPC_PORT || '8332', 10), // Default to a common RPC port (e.g., Bitcoin's default)
+    RPC_PORT: parseInt(process.env.RPC_PORT || '18332', 10), // Default to a common RPC port (e.g., Bitcoin's default)
 };
