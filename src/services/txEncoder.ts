@@ -3,6 +3,7 @@ import BigNumber from 'bignumber.js';
 const marker = 'tl';
 
 export const Encode = {
+    // Encode Activate Trade Layer
     encodeActivateTradeLayer(params: { txTypeToActivate: string | string[]; codeHash: string }): string {
         const txTypeEncoded = Array.isArray(params.txTypeToActivate)
             ? params.txTypeToActivate.join(';')
@@ -12,6 +13,7 @@ export const Encode = {
         return `${marker}${type}${txTypeEncoded},${base36hex}`;
     },
 
+    // Encode Token Issue Transaction
     encodeTokenIssue(params: {
         initialAmount: number;
         ticker: string;
@@ -32,6 +34,7 @@ export const Encode = {
         return `${marker}${type.toString(36)}${payload.join(',')}`;
     },
 
+    // Encode Send Transaction
     encodeSend(params: {
         isColoredOutput: boolean;
         sendAll?: boolean;
@@ -67,6 +70,7 @@ export const Encode = {
         return `${marker}${type.toString(36)}${payload.join(';')}`;
     },
 
+    // Encode Property ID
     encodePropertyId(propertyId: string | number): string {
         if (typeof propertyId === 'string' && propertyId.startsWith('s-')) {
             const [_, collateralId, contractId] = propertyId.split('-');
@@ -78,6 +82,7 @@ export const Encode = {
         }
     },
 
+    // Encode Trade Token for UTXO
     encodeTradeTokenForUTXO(params: {
         propertyId: number;
         amount: number;
@@ -103,12 +108,13 @@ export const Encode = {
         return `${marker}${type.toString(36)}${payload.join(',')}`;
     },
 
+    // Encode Commit Transaction
     encodeCommit(params: {
         propertyId: number;
         amount: number;
         channelAddress: string;
         payEnabled: boolean;
-        clearLists?: string | number[] | undefined;
+        clearLists?: string | number[];
         isColoredOutput: boolean;
         ref?: number;
     }): string {
@@ -116,6 +122,7 @@ export const Encode = {
         const channelAddress = params.channelAddress.length > 42 ? `ref:${params.ref || 0}` : params.channelAddress;
         const payEnabled = params.payEnabled ? '1' : '0';
         let clearLists = '';
+
         if (params.clearLists) {
             if (Array.isArray(params.clearLists)) {
                 clearLists = `[${params.clearLists.map((num) => num.toString(36)).join(',')}]`;
@@ -137,131 +144,38 @@ export const Encode = {
         return `${marker}${type.toString(36)}${payload.join(',')}`;
     },
 
-    encodeOnChainTokenForToken(params: {
-        propertyIdOffered: number;
-        propertyIdDesired: number;
-        amountOffered: number;
-        amountExpected: number;
-        stop: boolean;
-        post: boolean;
+    // Encode Transfer
+    encodeTransfer(params: {
+        propertyId: number;
+        amount: number;
+        isColumnA: boolean;
+        destinationAddr: string;
+        ref?: number;
     }): string {
-        const amountOffered = new BigNumber(params.amountOffered).times(1e8).toNumber();
-        const amountExpected = new BigNumber(params.amountExpected).times(1e8).toNumber();
+        const propertyId = params.propertyId.toString(36);
+        const amounts = new BigNumber(params.amount).times(1e8).toString(36);
+        const isColumnA = params.isColumnA ? '1' : '0';
+        const destinationAddr = params.destinationAddr.length > 42 ? `ref:${params.ref || 0}` : params.destinationAddr;
+
+        return `${marker}22${propertyId},${amounts},${isColumnA},${destinationAddr}`;
+    },
+
+    // Encode Attestation
+    encodeAttestation(params: {
+        revoke: number;
+        id: number;
+        targetAddress: string;
+        metaData: string;
+    }): string {
         const payload = [
-            params.propertyIdOffered.toString(36),
-            params.propertyIdDesired.toString(36),
-            amountOffered.toString(36),
-            amountExpected.toString(36),
-            params.stop ? '1' : '0',
-            params.post ? '1' : '0',
+            params.revoke.toString(36),
+            params.id.toString(36),
+            params.targetAddress,
+            params.metaData,
         ];
-        const type = 5;
+        const type = 9;
         return `${marker}${type.toString(36)}${payload.join(',')}`;
     },
 
-    encodeCancelOrder(params: {
-        isContract: boolean;
-        contractId?: number;
-        offeredPropertyId?: number;
-        desiredPropertyId?: number;
-        cancelAll: boolean;
-        cancelParams?: {
-            price?: number;
-            side?: number;
-            txid?: string;
-        };
-    }): string {
-        let encodedTx = params.isContract ? '1' : '0';
-
-        if (params.isContract) {
-            encodedTx += `,${params.contractId?.toString(36) ?? ''},${params.cancelAll ? 1 : 0}`;
-        } else {
-            encodedTx += `,${params.offeredPropertyId?.toString(36) ?? ''},${
-                params.desiredPropertyId?.toString(36) ?? ''
-            },${params.cancelAll ? 1 : 0}`;
-        }
-
-        if (params.cancelParams) {
-            if (params.cancelParams.price !== undefined) {
-                const priceEncoded = new BigNumber(params.cancelParams.price).times(8).toString(36);
-                encodedTx += `,${priceEncoded}`;
-                encodedTx += `,${params.cancelParams.side?.toString(36) ?? ''}`;
-            }
-
-            if (params.cancelParams.txid) {
-                encodedTx += `,${params.cancelParams.txid}`;
-            }
-        }
-
-        const type = 6;
-        return `${marker}${type.toString(36)}${encodedTx}`;
-    },
-
-    encodeCreateWhitelist(params: {
-        backupAddress: string;
-        name: string;
-        url: string;
-        description: string;
-    }): string {
-        const payload = [params.backupAddress, params.name, params.url, params.description];
-        const type = 7;
-        return `${marker}${type.toString(36)}${payload.join(',')}`;
-    },
-
-encodeTradeTokensChannel (params: {
-    propertyId1: number;
-    propertyId2: number;
-    amountOffered1: number;
-    amountDesired2: number;
-    columnAIsOfferer: number;
-    expiryBlock: number;
-}): string => {
-    const payload = [
-        params.propertyId1.toString(36),
-        params.propertyId2.toString(36),
-        new BigNumber(params.amountOffered1).times(1e8).toString(36), // Updated to use BigNumber
-        new BigNumber(params.amountDesired2).times(1e8).toString(36), // Updated to use BigNumber
-        params.columnAIsOfferer ? '1' : '0',
-        params.expiryBlock.toString(36),
-    ];
-    const txNumber = 20;
-    const txNumber36 = txNumber.toString(36);
-    const payloadString = payload.join(',');
-    return marker + txNumber36 + payloadString;
-},
-// Encode Transfer Transaction 
-encodeTransfer (params:{
-    propertyId: number;
-    amount: number;
-    isColumnA: boolean;
-    destinationAddr: string;
-    ref?: number; // New optional parameter for reference output
-}): string => {
-    const propertyId = params.propertyId.toString(36);
-    const amounts = new BigNumber(params.amount).times(1e8).toString(36);
-    const isColumnA = params.isColumnA ? 1 : 0;
-    const destinationAddr = params.destinationAddr.length > 42 ? `ref:${params.ref || 0}` : params.destinationAddr; // Handle long multisig addresses
-    
-    return [propertyId, amounts, isColumnA, destinationAddr].join(',');
-},
-
-encodeAttestation (params: {
-  revoke: number;
-  id: number;
-  targetAddress: string;
-  metaData: string; // Usually a country code or similar metadata
-}): string => {
-  const payload = [
-    params.revoke.toString(36),      // Revoke flag (0 or 1)
-    params.id.toString(36),         // ID (usually 0 for whitelist)
-    params.targetAddress,           // Address being attested
-    params.metaData                 // Metadata such as the country code
-  ];
-  const txNumber = 9; // Assuming attestation transaction is type 9
-  const txNumber36 = txNumber.toString(36);
-  const payloadString = payload.join(',');
-  return marker + txNumber36 + payloadString;
-}
-    
-    // Add all remaining methods similarly...
+    // Additional encoding methods go here...
 };
