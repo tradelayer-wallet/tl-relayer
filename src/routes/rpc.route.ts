@@ -4,6 +4,7 @@ import { rpcClient } from "../config/rpc.config";
 import { getAttestationPayload, importPubKey } from "../services/address.service";
 import { listunspent } from "../services/sochain.service";
 import { ELogType, saveLog } from "../services/utils.service";
+import Encode from "../services/encoder"; // Adjust the path based on where you save the Encoder file
 
 const allowedMethods = [
     'tl_initmain',
@@ -41,7 +42,8 @@ const allowedMethods = [
     'tl_oracleHistory',
     'sendrawtransaction',
     'decoderawtransaction',
-    'validateaddress'
+    'validateaddress',
+    'payload'
 ];
 
 export const rpcRoutes = (fastify: FastifyInstance, opts: any, done: any) => {
@@ -50,6 +52,29 @@ export const rpcRoutes = (fastify: FastifyInstance, opts: any, done: any) => {
             const { params } = request.body as { params: any[] };
             const { method } = request.params as { method: string };
 
+             // If the method is 'payload', handle encoding
+            if (method === 'payload') {
+                if (!params?.type) {
+                    reply.status(400).send({ error: `Missing 'type' parameter in payload request.` });
+                    return;
+                }
+
+                const encoderType = `encode${params.type.charAt(0).toUpperCase() + params.type.slice(1)}`;
+                if (typeof Encode[encoderMethod] === 'function') {
+                    try {
+                        const payload = Encode[encoderType](params);
+                        reply.send({ payload });
+                        return;
+                    } catch (encodingError) {
+                        reply.status(500).send({ error: `Error encoding payload: ${encodingError.message}` });
+                        return;
+                    }
+                } else {
+                    reply.status(400).send({ error: `Encoding method '${encoderMethod}' not found.` });
+                    return;
+                }
+            }
+            
             // Forward "tl_" prefixed methods to localhost:3000
             if (method.startsWith("tl_")) {
                 try {
