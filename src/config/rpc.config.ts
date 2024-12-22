@@ -12,6 +12,6 @@ const options: IRpcClientOptions = {
 export const rpcClient = new RpcClient(options);
 
 export const handleRpcConenction = async () => {
-    const res = await rpcClient.call('tl_getinfo');
+    const res = await rpcClient.call('getblockchaininfo');
     return res.data?.blocktime ? true : false;
 }
