@@ -7,9 +7,10 @@ export const chainRoute = (fastify: FastifyInstance, opts: any, done: any) => {
             const res = await getChainInfo();
             reply.send(res);
         } catch (error: unknown) {
-            reply.send({ error: error.message });
+            const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+            reply.status(500).send({ error: errorMessage });
         }
     });
 
     done();
-}
+};
