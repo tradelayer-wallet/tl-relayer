@@ -54,7 +54,7 @@ export const rpcRoutes = (fastify: FastifyInstance, opts: any, done: any) => {
 
              // If the method is 'payload', handle encoding
             if (method === 'payload') {
-                if (!params?.type) {
+                if (const { params } = request.body as { params: { type?: string; [key: string]: any } };) {
                     reply.status(400).send({ error: `Missing 'type' parameter in payload request.` });
                     return;
                 }
