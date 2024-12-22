@@ -6,6 +6,9 @@
     "sourceMap": false,
     "target": "ES5",
     "module": "commonjs",
+    "allowJs": true,          // Allows JavaScript files to be imported
+    "esModuleInterop": true,  // Ensures compatibility with ES module imports
+    "strict": true            // Enables strict type checking (optional but recommended)
   },
-  "include": ["./src/**/*"],
+  "include": ["./src/**/*", "./services/txEncoder.js"]
 }
