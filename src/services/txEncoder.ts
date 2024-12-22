@@ -126,8 +126,6 @@ export const Encode = {
       if (params.clearLists) {
             if (Array.isArray(params.clearLists)) {
                 clearLists = `[${params.clearLists.map((num) => num.toString(36)).join(',')}]`;
-            } else if (typeof params.clearLists === 'number' || typeof params.clearLists === 'string') {
-                clearLists = params.clearLists.toString(36);
             } else {
                 clearLists = ''; // Fallback for invalid types
             }
