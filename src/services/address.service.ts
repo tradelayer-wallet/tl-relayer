@@ -44,5 +44,3 @@ export const importPubKey = async (server: any, params: any[]) => {
         return { error: error.message };
     }
 };
-
-};
