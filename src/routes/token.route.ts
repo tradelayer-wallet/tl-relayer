@@ -6,7 +6,7 @@ export const tokenRoute = (fastify: FastifyInstance, opts: any, done: any) => {
         try {
             const res = await listTokens();
             reply.send(res);
-        } catch (error) {
+        } catch (error: unknown) {
             reply.send({ error: error.message });
         }
     });
@@ -17,7 +17,7 @@ export const tokenRoute = (fastify: FastifyInstance, opts: any, done: any) => {
             const _propid = parseInt(propid);
             const res = await getTokenInfo(_propid);
             reply.send(res);
-        } catch (error) {
+        } catch (error: unknown) {
             reply.send({ error: error.message });
         }
     });
