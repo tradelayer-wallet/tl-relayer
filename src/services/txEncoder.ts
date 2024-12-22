@@ -127,7 +127,7 @@ export const Encode = {
             if (Array.isArray(params.clearLists)) {
                 clearLists = `[${params.clearLists.map((num) => num.toString(36)).join(',')}]`;
             } else {
-                clearLists = params.clearLists.toString(36);
+                clearLists = params.clearLists ? params.clearLists.toString(36) : '';
             }
         }
 
