@@ -13,13 +13,6 @@ export const envConfig: {
     RPC_PASS: string;
     RPC_HOST: string;
     RPC_PORT: number;
-    VPN_KEYS: {
-        VPN_CRIMINALIP: string;
-        VPN_IPHUB: string;
-        VPN_IPINFO: string;
-        VPN_IPHUNTER: string;
-        VPN_VPNAPI: string;
-    };
 } = {
     SERVER_PORT: parseInt(process.env.SERVER_PORT),
     SOCKET_PORT: parseInt(process.env.SOCKET_PORT),
