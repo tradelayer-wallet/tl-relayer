@@ -60,7 +60,7 @@ export const rpcRoutes = (fastify: FastifyInstance, opts: any, done: any) => {
                 }
 
                 const encoderType = `encode${params.type.charAt(0).toUpperCase() + params.type.slice(1)}`;
-                if (typeof Encode[encoderMethod] === 'function') {
+                if (typeof Encode[encoderType] === 'function') {
                     try {
                         const payload = Encode[encoderType](params);
                         reply.send({ payload });
@@ -70,7 +70,7 @@ export const rpcRoutes = (fastify: FastifyInstance, opts: any, done: any) => {
                         return;
                     }
                 } else {
-                    reply.status(400).send({ error: `Encoding method '${encoderMethod}' not found.` });
+                    reply.status(400).send({ error: `Encoding method '${encoderType}' not found.` });
                     return;
                 }
             }
