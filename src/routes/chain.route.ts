@@ -6,7 +6,7 @@ export const chainRoute = (fastify: FastifyInstance, opts: any, done: any) => {
         try {
             const res = await getChainInfo();
             reply.send(res);
-        } catch (error) {
+        } catch (error: unknown) {
             reply.send({ error: error.message });
         }
     });
