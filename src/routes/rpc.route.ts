@@ -124,7 +124,7 @@ export const rpcRoutes = (fastify: FastifyInstance, opts: any, done: any) => {
             reply.send(res);
         } catch (error: unknown) {
             const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-            console.error(`Error in RPC route for method ${request.params.method}:`, errorMessage);
+            console.error(`Error in RPC route:`, errorMessage);
             reply.status(500).send({ error: errorMessage });
         }
     });
