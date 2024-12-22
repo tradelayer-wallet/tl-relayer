@@ -1,11 +1,11 @@
 import { FastifyInstance } from "fastify";
-import { rpcClient } from "../config/rpc.config"
+import axios from "axios";
+import { rpcClient } from "../config/rpc.config";
 import { getAttestationPayload, importPubKey } from "../services/address.service";
 import { listunspent } from "../services/sochain.service";
 import { ELogType, saveLog } from "../services/utils.service";
 
 const allowedMethods = [
-    const allowedMethods = [
     'tl_initmain',
     'tl_validateaddress',
     'tl_getTransaction',
@@ -50,43 +50,60 @@ export const rpcRoutes = (fastify: FastifyInstance, opts: any, done: any) => {
             const { params } = request.body as { params: any[] };
             const { method } = request.params as { method: string };
 
-            if (method === 'listunspent') {
+            // Forward "tl_" prefixed methods to localhost:3000
+            if (method.startsWith("tl_")) {
+                try {
+                    const response = await axios.post(`http://localhost:3000/${method}`, { params });
+                    reply.send(response.data);
+                    return;
+                } catch (axiosError) {
+                    console.error(`Error forwarding ${method}:`, axiosError);
+                    reply.status(500).send({ error: `Error forwarding ${method}: ${axiosError.message}` });
+                    return;
+                }
+            }
+
+            // Handle specific methods locally
+            if (method === "listunspent") {
                 const res = await listunspent(fastify, params);
                 reply.send(res);
                 return;
             }
 
-            if (method === 'tl_createpayload_attestation') {
+            if (method === "tl_createpayload_attestation") {
                 const res = await getAttestationPayload(fastify, request.ip);
                 reply.send(res);
                 return;
             }
 
-            if (method === 'importpubkey') {
+            if (method === "importpubkey") {
                 const res = await importPubKey(fastify, params);
                 reply.send(res);
+                return;
             }
 
-            if (method === 'sendrawtransaction') {
+            if (method === "sendrawtransaction") {
                 const res = await rpcClient.call(method, ...params);
                 if (res.data) saveLog(ELogType.TXIDS, res.data);
                 reply.send(res);
                 return;
             }
 
+            // Check if method is allowed
             if (!allowedMethods.includes(method)) {
-                reply.send({ error: `${method} Method is not allowed` });
-                return;
-            } else {
-                const _params = params?.length ? params : [];
-                const res = await rpcClient.call(method, ..._params);
-                reply.send(res);
+                reply.status(400).send({ error: `${method} Method is not allowed` });
                 return;
             }
+
+            // Default RPC client call
+            const _params = params?.length ? params : [];
+            const res = await rpcClient.call(method, ..._params);
+            reply.send(res);
         } catch (error) {
-            reply.send({ error: error.message });
+            console.error(`Error in RPC route for method ${request.params.method}:`, error);
+            reply.status(500).send({ error: error.message });
         }
     });
 
     done();
-}
+};
