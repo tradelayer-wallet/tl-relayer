@@ -7,7 +7,7 @@ export const txRoute = (fastify: FastifyInstance, opts: any, done: any) => {
             const { txid } = request.params as { txid: string };
             const res = await getTx(txid);
             reply.send(res);
-        } catch (error) {
+        } catch (error: unknown) {
             reply.send({ error: error.message });
         }
     });
