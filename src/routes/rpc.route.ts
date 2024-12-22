@@ -50,13 +50,14 @@ export const rpcRoutes = (fastify: FastifyInstance, opts: any, done: any) => {
     fastify.post('/:method', async (request, reply) => {
         try {
             // Extract parameters and method from the request
-            const { params } = request.body as { params: { type?: string; [key: string]: any } | any[] };
+            const { params } = request.body as { params: any[] | { type?: string; [key: string]: any } };
             const { method } = request.params as { method: string };
 
             // If the method is 'payload', handle encoding
             if (method === 'payload') {
-                if (!params?.type || typeof params?.type !== "string") {
-                    reply.status(400).send({ error: `Missing or invalid 'type' parameter in payload request.` });
+                // Check if params is an object
+                if (!params || Array.isArray(params) || typeof params.type !== "string") {
+                    reply.status(400).send({ error: `Invalid 'params' or missing 'type' in payload request.` });
                     return;
                 }
 
