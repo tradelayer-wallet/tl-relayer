@@ -81,7 +81,7 @@ export const rpcRoutes = (fastify: FastifyInstance, opts: any, done: any) => {
                     const response = await axios.post(`http://localhost:3000/${method}`, { params });
                     reply.send(response.data);
                     return;
-                } catch (axiosError) {
+                } catch (axiosError: unknown) {
                     console.error(`Error forwarding ${method}:`, axiosError);
                     reply.status(500).send({ error: `Error forwarding ${method}: ${axiosError.message}` });
                     return;
