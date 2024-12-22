@@ -1,58 +1,60 @@
 import { envConfig } from "../config/env.config";
-import { rpcClient } from "../config/rpc.config"
+import { rpcClient } from "../config/rpc.config";
 
-const baseURL = 'https://chain.so/api/v2/';
-const { NETWORK } = envConfig;
+const baseURL = 'https://api.blockcypher.com/v1/';
+const token = 'a2b9d2c5fbfc49f39589c2751f599725'; // Your blockcypher token
 
 export const listunspent = async (server: any, params: any[]) => {
     try {
         const address = params?.[2]?.[0];
-        const minBlock = params?.[0];
-        const maxBlock = params?.[1];
-        if (!address) return { error: `Error with getting UTXOs. Code: 0`};
+        const minBlock = params?.[0] ?? 1; // Default to 1 if undefined
+        const maxBlock = params?.[1] ?? 99999999; // Default to 99999999 if undefined
+
+        if (!address) return { error: `Error with getting UTXOs. Code: 0` };
+
         const vaRes = await rpcClient.call('validateaddress', address);
-        if (vaRes.error || !vaRes.data) throw new Error(vaRes.error);
+        if (vaRes.error || !vaRes.data) throw new Error(`validateaddress Error: ${vaRes.error}`);
+
         const pubkey = vaRes.data.pubkey;
         if (pubkey) {
             const luRes = await rpcClient.call('listunspent', ...params);
             if (!luRes.data || luRes.error) throw new Error(`listunspent Error: ${luRes.error}`);
-            const data = luRes.data.map((u: any) => {
-                return {
+            
+            const data = luRes.data
+                .filter((u: any) => u.confirmations >= minBlock && u.confirmations <= maxBlock)
+                .map((u: any) => ({
                     txid: u.txid,
                     amount: u.amount,
                     confirmations: u.confirmations,
                     scriptPubKey: u.scriptPubKey,
                     vout: u.vout,
-                };
-            });
+                }));
+                
             return { data };
         } else {
-            const method = 'get_tx_unspent';
-            const url = baseURL + method + '/' + NETWORK + '/' + address;
-            const { data, error } = await server.axios.get(url);
+            const url = `${baseURL}ltc/${envConfig.NETWORK}/addrs/${address}/balance?token=${token}`;
+            const response = await server.axios.get(url);
+
+            const { data, error } = response;
             if (error || !data) {
-                return { error: error || `Error with getting ${address} UTXOs. Code: 1`};
-            } else {
-                const { status } = data;
-                if (status !== 'success') {
-                    return { error: `Error with getting ${address} UTXOs. Code: 2`};
-                } else {
-                    const utxos = data.data.txs
-                        .filter(({ confirmations }) => confirmations >= minBlock && confirmations <= maxBlock)
-                        .map((u: any) => {
-                            return {
-                                txid: u.txid,
-                                amount: parseFloat(u.value),
-                                confirmations: u.confirmations,
-                                scriptPubKey: u.script_hex,
-                                vout: u.output_no,
-                            };
-                        });
-                    return { data: utxos };
-                }
+                return { error: error || `Error with getting ${address} UTXOs. Code: 1` };
+            } else if (!data.txrefs) {
+                return { error: `Error: No transaction references (UTXOs) for address ${address}.` };
             }
+
+            const utxos = data.txrefs
+                .filter(({ confirmations }) => confirmations >= minBlock && confirmations <= maxBlock)
+                .map((u: any) => ({
+                    txid: u.tx_hash,
+                    amount: u.value / 1e8, // Convert satoshis to LTC
+                    confirmations: u.confirmations,
+                    scriptPubKey: u.script,
+                    vout: u.tx_output_n,
+                }));
+
+            return { data: utxos };
         }
     } catch (err) {
         return { error: err.message };
     }
-}
+};
