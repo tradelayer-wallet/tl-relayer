@@ -123,13 +123,16 @@ export const Encode = {
         const payEnabled = params.payEnabled ? '1' : '0';
         let clearLists = '';
 
-        if (params.clearLists) {
+      if (params.clearLists) {
             if (Array.isArray(params.clearLists)) {
                 clearLists = `[${params.clearLists.map((num) => num.toString(36)).join(',')}]`;
+            } else if (typeof params.clearLists === 'number' || typeof params.clearLists === 'string') {
+                clearLists = params.clearLists.toString(36);
             } else {
-                clearLists = params.clearLists ? params.clearLists.toString(36) : '';
+                clearLists = ''; // Fallback for invalid types
             }
         }
+
 
         const isColoredOutput = params.isColoredOutput ? '1' : '0';
         const payload = [
