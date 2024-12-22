@@ -50,20 +50,21 @@ export const rpcRoutes = (fastify: FastifyInstance, opts: any, done: any) => {
     fastify.post('/:method', async (request, reply) => {
         try {
             // Extract parameters and method from the request
-            const { params } = request.body as { params: { type?: string; [key: string]: any } };
+            const { params } = request.body as { params: { type?: string; [key: string]: any } | any[] };
             const { method } = request.params as { method: string };
 
             // If the method is 'payload', handle encoding
             if (method === 'payload') {
-                if (!params?.type) {
-                    reply.status(400).send({ error: `Missing 'type' parameter in payload request.` });
+                if (!params?.type || typeof params?.type !== "string") {
+                    reply.status(400).send({ error: `Missing or invalid 'type' parameter in payload request.` });
                     return;
                 }
 
                 const encoderType = `encode${params.type.charAt(0).toUpperCase() + params.type.slice(1)}`;
-                if (typeof Encode[encoderType] === 'function') {
+
+                if (typeof Encode[encoderType as keyof typeof Encode] === 'function') {
                     try {
-                        const payload = Encode[encoderType](params);
+                        const payload = (Encode[encoderType as keyof typeof Encode] as Function)(params);
                         reply.send({ payload });
                         return;
                     } catch (encodingError: unknown) {
@@ -93,19 +94,19 @@ export const rpcRoutes = (fastify: FastifyInstance, opts: any, done: any) => {
 
             // Other specific methods
             if (method === "listunspent") {
-                const res = await listunspent(fastify, params);
+                const res = await listunspent(fastify, params as any[]);
                 reply.send(res);
                 return;
             }
 
             if (method === "importpubkey") {
-                const res = await importPubKey(fastify, params);
+                const res = await importPubKey(fastify, params as any[]);
                 reply.send(res);
                 return;
             }
 
             if (method === "sendrawtransaction") {
-                const res = await rpcClient.call(method, ...params);
+                const res = await rpcClient.call(method, ...(params as any[]));
                 if (res.data) saveLog(ELogType.TXIDS, res.data);
                 reply.send(res);
                 return;
@@ -117,7 +118,7 @@ export const rpcRoutes = (fastify: FastifyInstance, opts: any, done: any) => {
                 return;
             }
 
-            const _params = params?.length ? params : [];
+            const _params = Array.isArray(params) ? params : [];
             const res = await rpcClient.call(method, ..._params);
             reply.send(res);
         } catch (error: unknown) {
