@@ -13,20 +13,17 @@ import cors from '@fastify/cors';
 class FastifyServer {
     private _server: FastifyInstance;
 
-    this.server.register(cors, {
-        origin: 'https://www.layerwallet.com', // Allow all origins for testing
-        methods: ['GET', 'POST', 'OPTIONS'],
-        allowedHeaders: ['Content-Type', 'Authorization'],
-    });
-
-    
-    constructor(
-        private port: number, 
-        private options: FastifyServerOptions,
-    ) {
+    constructor(private port: number, private options: FastifyServerOptions) {
         this._server = Fastify(options);
-    }
 
+        // Register CORS
+        this._server.register(cors, {
+            origin: 'https://www.layerwallet.com', // Restrict to your domain
+            methods: ['GET', 'POST', 'OPTIONS'],
+            allowedHeaders: ['Content-Type', 'Authorization'],
+        });
+    }
+    
     private get server() {
         return this._server;
     }
