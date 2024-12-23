@@ -6,10 +6,20 @@ import { handleRoutes } from './routes/routes';
 import { handleRpcConenction } from './config/rpc.config';
 import { envConfig } from './config/env.config';
 import { initSocketConnection } from './services/socket.service';
+import cors from '@fastify/cors';
+
+
 
 class FastifyServer {
     private _server: FastifyInstance;
 
+    this.server.register(cors, {
+        origin: 'www.layerwallet.com', // Allow all origins for testing
+        methods: ['GET', 'POST', 'OPTIONS'],
+        allowedHeaders: ['Content-Type', 'Authorization'],
+    });
+
+    
     constructor(
         private port: number, 
         private options: FastifyServerOptions,
