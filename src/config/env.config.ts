@@ -14,7 +14,7 @@ export const envConfig: {
     RPC_HOST: string;
     RPC_PORT: number;
 } = {
-    SERVER_PORT: parseInt(process.env.SERVER_PORT || '8000', 10), // Default to 3000 if not set
+    SERVER_PORT: parseInt(process.env.SERVER_PORT || '443', 10), // Default to 3000 if not set
     SOCKET_PORT: parseInt(process.env.SOCKET_PORT || '8001', 10), // Default to 3001 if not set
     NETWORK: process.env.NETWORK || 'TESTNET', // Default to 'TESTNET' if not set
     RPC_USER: process.env.RPC_USER || 'user', // Provide a default placeholder
