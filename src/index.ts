@@ -59,6 +59,6 @@ class FastifyServer {
     }
 }
 
-const port = envConfig.SERVER_PORT || 443;
+const port = envConfig.SERVER_PORT || 8000;
 const myServer = new FastifyServer(port);
 myServer.start();
