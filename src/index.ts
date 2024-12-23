@@ -42,6 +42,7 @@ class FastifyServer {
         this.server.register(cors, {
             origin: 'https://www.layerwallet.com',
             methods: ['GET', 'POST', 'OPTIONS'],
+            credentials: true,
             allowedHeaders: ['Content-Type', 'Authorization'],
         });
     }
