@@ -57,7 +57,7 @@ const sslOptions = {
 
 const httpsServer = https.createServer(sslOptions);
 
-const port = envConfig.SERVER_PORT ||9191;
+const port = envConfig.SERVER_PORT ||443;
 const options: FastifyServerOptions = {
     logger: true,
     serverFactory: (handler) => httpsServer.on('request', handler),
