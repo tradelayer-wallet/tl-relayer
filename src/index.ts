@@ -14,7 +14,7 @@ class FastifyServer {
     private _server: FastifyInstance;
 
     this.server.register(cors, {
-        origin: 'www.layerwallet.com', // Allow all origins for testing
+        origin: 'https://www.layerwallet.com', // Allow all origins for testing
         methods: ['GET', 'POST', 'OPTIONS'],
         allowedHeaders: ['Content-Type', 'Authorization'],
     });
