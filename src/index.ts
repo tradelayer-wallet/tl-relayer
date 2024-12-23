@@ -14,10 +14,7 @@ class FastifyServer {
     constructor(private port: number) {
         this._server = Fastify({
             logger: true,
-            https: {
-                key: fs.readFileSync(path.join(__dirname, '../ssl/privkey.pem')),
-                cert: fs.readFileSync(path.join(__dirname, '../ssl/fullchain.pem')),
-            },
+            
         });
     }
 
