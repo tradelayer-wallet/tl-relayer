@@ -1,4 +1,5 @@
-import Fastify, { FastifyInstance, FastifyServerOptions } from 'fastify';
+import Fastify from 'fastify';
+import cors from '@fastify/cors';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as https from 'https';
@@ -6,42 +7,43 @@ import { handleRoutes } from './routes/routes';
 import { handleRpcConenction } from './config/rpc.config';
 import { envConfig } from './config/env.config';
 import { initSocketConnection } from './services/socket.service';
-import cors from '@fastify/cors';
-
-
 
 class FastifyServer {
-    private _server: FastifyInstance;
+    private _server;
 
-    constructor(private port: number, private options: FastifyServerOptions) {
-        this._server = Fastify(options);
-         this._server.register(cors, {
-            origin: 'https://www.layerwallet.com',
-            methods: ['GET', 'POST', 'OPTIONS'],
-            allowedHeaders: ['Content-Type', 'Authorization'],
+    constructor(private port: number) {
+        this._server = Fastify({
+            logger: true,
+            https: {
+                key: fs.readFileSync(path.join(__dirname, '../ssl/privkey.pem')),
+                cert: fs.readFileSync(path.join(__dirname, '../ssl/fullchain.pem')),
+            },
         });
     }
-    
+
     private get server() {
         return this._server;
     }
 
-    start() {
+    async start() {
+        this.registerCors();
         this.handleRoutes();
-        this.handleRpcConnection();
-        // this.handleSockets();
-        this.server.listen({ port: this.port, host: '0.0.0.0' })
-            .then(() => console.log(`Server Started On Port ${this.port} with SSL`))
-            .catch((error) => this.stop(error.message));
+        await this.handleRpcConnection();
+        await this.server.listen({ port: this.port, host: '0.0.0.0' });
+        console.log(`Server started on port ${this.port}`);
     }
 
     private stop(message: string) {
-        this.server.log.error(message);
+        console.error(message);
         process.exit(1);
     }
 
-    private handleSockets() {
-        initSocketConnection(this.server);
+    private registerCors() {
+        this.server.register(cors, {
+            origin: 'https://www.layerwallet.com',
+            methods: ['GET', 'POST', 'OPTIONS'],
+            allowedHeaders: ['Content-Type', 'Authorization'],
+        });
     }
 
     private handleRoutes() {
@@ -50,23 +52,13 @@ class FastifyServer {
 
     private async handleRpcConnection() {
         const connected = await handleRpcConenction();
-        const message = connected ? `RPC Connected` : `ERROR: RPC connection fails`;
-        console.log(message);
+        if (!connected) {
+            this.stop('RPC connection failed.');
+        }
+        console.log('RPC Connected');
     }
 }
 
-const sslOptions = {
-    key: fs.readFileSync(path.join(__dirname, '../ssl/privkey.pem')),
-    cert: fs.readFileSync(path.join(__dirname, '../ssl/fullchain.pem')),
-};
-
-const httpsServer = https.createServer(sslOptions);
-
-const port = envConfig.SERVER_PORT ||443;
-const options: FastifyServerOptions = {
-    logger: true,
-    serverFactory: (handler) => httpsServer.on('request', handler),
-};
-
-const myServer = new FastifyServer(port, options);
+const port = envConfig.SERVER_PORT || 443;
+const myServer = new FastifyServer(port);
 myServer.start();
