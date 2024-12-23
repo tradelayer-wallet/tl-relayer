@@ -1,6 +1,6 @@
 import { FastifyInstance, FastifyRequest } from "fastify";
 import { fundAddress, getAddressBalance, validateAddress } from "../services/address.service";
-import { listunspent } from "../services/utxo.service"; // Import the new function
+import { listunspent } from "../services/sochain.service"; // Import the new function
 
 export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => {
     fastify.get('/validate/:address', async (request: FastifyRequest<{ Params: { address: string } }>, reply) => {
