@@ -15,6 +15,11 @@ class FastifyServer {
 
     constructor(private port: number, private options: FastifyServerOptions) {
         this._server = Fastify(options);
+         this._server.register(cors, {
+            origin: 'https://www.layerwallet.com',
+            methods: ['GET', 'POST', 'OPTIONS'],
+            allowedHeaders: ['Content-Type', 'Authorization'],
+        });
     }
     
     private get server() {
@@ -56,13 +61,6 @@ const sslOptions = {
 };
 
 const httpsServer = https.createServer(sslOptions);
-
-
-httpsServer.register(cors, {
-    origin: 'https://www.layerwallet.com',
-    methods: ['GET', 'POST', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
-});
 
 const port = envConfig.SERVER_PORT ||443;
 const options: FastifyServerOptions = {
