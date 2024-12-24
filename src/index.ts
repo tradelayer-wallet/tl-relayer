@@ -35,14 +35,14 @@ class FastifyServer {
         process.exit(1);
     }
 
-    private registerCors() {
+    /*private registerCors() {
         this.server.register(cors, {
             origin: 'https://www.layerwallet.com',
             methods: ['GET', 'POST', 'OPTIONS'],
             credentials: true,
             allowedHeaders: ['Content-Type', 'Authorization'],
         });
-    }
+    }*/
 
     private handleRoutes() {
         handleRoutes(this.server);
