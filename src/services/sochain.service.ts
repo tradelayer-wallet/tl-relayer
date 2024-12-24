@@ -18,15 +18,13 @@ export const listunspent = async (
 
         // Validate the address
         const vaRes = await rpcClient.call("validateaddress", address);
-        if (vaRes.error || !vaRes.data.isvalid) {
-            throw new Error(`Invalid address: ${address}`);
-        }
-
-        // Check if the pubkey needs to be imported
-        if (pubkey) {
-            const importResult = await importPubKey(server, [pubkey, address]);
-            if (importResult.error) {
-                throw new Error(`Failed to import pubkey: ${importResult.error}`);
+        if (!vaRes.data.isvalid) {
+              // Check if the pubkey needs to be imported
+            if (pubkey) {
+                const importResult = await importPubKey(server, [pubkey, address]);
+                if (importResult.error) {
+                    throw new Error(`Failed to import pubkey: ${importResult.error}`);
+                }
             }
         }
 
