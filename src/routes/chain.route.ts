@@ -13,8 +13,7 @@ export const chainRoute = (fastify: FastifyInstance, opts: any, done: any) => {
     });
 
  
-
- fastify.post(
+fastify.post(
     "/check-ip",
     async (
       request: FastifyRequest<{ Body: { ip: string } }>, // Define the type of request body
@@ -37,7 +36,6 @@ export const chainRoute = (fastify: FastifyInstance, opts: any, done: any) => {
       }
     }
   );
-
 
    done();
 };
