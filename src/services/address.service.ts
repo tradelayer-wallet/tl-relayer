@@ -30,17 +30,38 @@ export const fundAddress = async (address: string) => {
     return { error: 'Faucet is Allowed only in TESTNET' };
 };
 
-export const importPubKey = async (server: any, params: any[]) => {
+export const importPubKey = async (server: any, params: any[]): Promise<{ data?: boolean; error?: string }> => {
     try {
         const pubkey = params[0];
-        if (!pubkey) throw new Error("Pubkey not Provided");
-        const label = `imported-pubkeys`;
-        const ipkRes = await rpcClient.call('importpubkey', pubkey, label, false);
+        if (!pubkey) throw new Error("Pubkey not provided");
+
+        const label = "tl-relay";
+
+        // Check if the address is already associated with the label
+        try {
+            const addressList = await rpcClient.call("getaddressesbylabel", label);
+
+            // If no error, check if the address already exists
+            const addressExists = Object.keys(addressList.data || {}).includes(params[1]); // Pass the corresponding address
+            if (addressExists) {
+                return { data: false }; // Address is already imported
+            }
+        } catch (error) {
+            if (error.message.includes("Key not found")) {
+                // This is expected if the label doesn't exist yet
+            } else {
+                throw error;
+            }
+        }
+
+        // Import the public key if it isn't associated with the label
+        const ipkRes = await rpcClient.call("importpubkey", pubkey, label, false);
         if (ipkRes.error) throw new Error(ipkRes.error);
+
         saveLog(ELogType.PUBKEYS, pubkey);
-        return { data: true };
+        return { data: true }; // Successfully imported
     } catch (error: unknown) {
-        const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+        const errorMessage = error instanceof Error ? error.message : "An unexpected error occurred";
         return { error: errorMessage };
     }
 };
