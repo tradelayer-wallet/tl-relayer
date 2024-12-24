@@ -36,7 +36,7 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
         }
     });
 
-    fastify.get(
+    fastify.post(
             '/utxo/:address',
             async (
                 request: FastifyRequest<{
