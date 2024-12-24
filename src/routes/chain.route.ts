@@ -1,4 +1,5 @@
-import { FastifyInstance } from "fastify";
+import { FastifyInstance, FastifyRequest } from "fastify";
+
 import { getChainInfo, checkIP  } from "../services/chain.service";
 
 export const chainRoute = (fastify: FastifyInstance, opts: any, done: any) => {
