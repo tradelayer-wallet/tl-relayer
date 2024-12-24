@@ -1,5 +1,5 @@
 import Fastify from 'fastify';
-import cors from '@fastify/cors';
+//import cors from '@fastify/cors';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as https from 'https';
@@ -23,7 +23,7 @@ class FastifyServer {
     }
 
     async start() {
-        this.registerCors();
+        //this.registerCors();
         this.handleRoutes();
         await this.handleRpcConnection();
         await this.server.listen({ port: this.port, host: '0.0.0.0' });
