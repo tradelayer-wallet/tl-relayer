@@ -93,19 +93,6 @@ export const rpcRoutes = (fastify: FastifyInstance, opts: any, done: any) => {
                 }
             }
 
-            // Other specific methods
-            if (method === "listunspent") {
-                const res = await listunspent(fastify, params as any[]);
-                reply.send(res);
-                return;
-            }
-
-            if (method === "importpubkey") {
-                const res = await importPubKey(fastify, params as any[]);
-                reply.send(res);
-                return;
-            }
-
             if (method === "sendrawtransaction") {
                 const res = await rpcClient.call(method, ...(params as any[]));
                 if (res.data) saveLog(ELogType.TXIDS, res.data);
