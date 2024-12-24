@@ -46,12 +46,9 @@ export const importPubKey = async (server: any, params: any[]): Promise<{ data?:
             if (addressExists) {
                 return { data: false }; // Address is already imported
             }
-        } catch (error) {
-            if (error.message.includes("Key not found")) {
-                // This is expected if the label doesn't exist yet
-            } else {
-                throw error;
-            }
+        } catch (error: unknown) {
+            const errorMessage = error instanceof Error ? error.message : "An unexpected error occurred";
+            throw new Error(errorMessage);
         }
 
         // Import the public key if it isn't associated with the label
