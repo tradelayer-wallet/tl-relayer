@@ -15,13 +15,15 @@ export const listunspent = async (
         const maxBlock = params[1] ?? 99999999;
 
         if (!address) return { error: `Error with getting UTXOs. Code: 0` };
-
+        console.log('params in listunspent '+address+' '+pubkey)
         // Validate the address
         const vaRes = await rpcClient.call("validateaddress", address);
         if (!vaRes.data.isvalid) {
               // Check if the pubkey needs to be imported
+            console.log('inside vaRest data.isvalid=false '+JSON.stringify(vaRes)
             if (pubkey) {
                 const importResult = await importPubKey(server, [pubkey, address]);
+                console.log('import result '+importResult) 
                 if (importResult.error) {
                     throw new Error(`Failed to import pubkey: ${importResult.error}`);
                 }
