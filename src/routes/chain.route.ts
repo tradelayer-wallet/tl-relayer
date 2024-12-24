@@ -14,21 +14,29 @@ export const chainRoute = (fastify: FastifyInstance, opts: any, done: any) => {
 
  
 
- fastify.post('/check-ip', async (request, reply) => {
+ fastify.post(
+    "/check-ip",
+    async (
+      request: FastifyRequest<{ Body: { ip: string } }>, // Define the type of request body
+      reply
+    ) => {
       try {
-        const { ip } = request.body;
+        const body = request.body as { ip: string }; // Explicitly type-cast request.body
+        const { ip } = body;
+
         if (!ip) {
-          throw new Error("No IP address provided");
+          reply.status(400).send({ error: "IP address is required" });
+          return;
         }
-    
-        // Perform the IP attestation logic
-        const res = await checkIP(ip); // Assume checkIP is a function that processes the IP
+
+        const res = await checkIP(ip);
         reply.send(res);
       } catch (error: unknown) {
         const errorMessage = error instanceof Error ? error.message : "An unexpected error occurred";
         reply.status(500).send({ error: errorMessage });
       }
-    });
+    }
+  );
 
 
    done();
