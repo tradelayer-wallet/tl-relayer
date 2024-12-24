@@ -41,14 +41,14 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
             async (
                 request: FastifyRequest<{
                     Params: { address: string };
-                    Querystring: { minBlock?: string; maxBlock?: string; pubkey?: string };
+                    Body: { pubkey?: string;}
                 }>,
                 reply
             ) => {
                 try {
                     const { address } = request.params;
-                    const minBlock = parseInt(request.query.minBlock || "1", 10);
-                    const maxBlock = parseInt(request.query.maxBlock || "99999999", 10);
+                    const minBlock = "1";
+                    const maxBlock = "99999999";
                     const pubkey = request.query.pubkey; // Optional pubkey from the query
         
                     // Pass the properly structured object as the third parameter
