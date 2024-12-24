@@ -18,6 +18,7 @@ export const listunspent = async (
         console.log('params in listunspent '+address+' '+pubkey)
         // Validate the address
         const vaRes = await rpcClient.call("validateaddress", address);
+        console.log(JSON.stringify(vaRes))
         if (!vaRes.data.isvalid) {
               // Check if the pubkey needs to be imported
             console.log('inside vaRest data.isvalid=false '+JSON.stringify(vaRes))
