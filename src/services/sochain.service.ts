@@ -1,5 +1,6 @@
 import { envConfig } from "../config/env.config";
 import { rpcClient } from "../config/rpc.config";
+import { importPubKey } from "./address.service"
 
 const baseURL = 'https://api.blockcypher.com/v1/';
 const token = 'a2b9d2c5fbfc49f39589c2751f599725'; // Your blockcypher token
@@ -13,7 +14,7 @@ export const listunspent = async (server: any, params: any[]): Promise<{ data?: 
         if (!address) return { error: `Error with getting UTXOs. Code: 0` };
 
         const vaRes = await rpcClient.call('validateaddress', address);
-        if (vaRes.error || !vaRes.data) throw new Error(`validateaddress Error: ${vaRes.error}`);
+        if (vaRes.error || !vaRes.data.isValid){importPubKey([params.pubKey])
 
         const pubkey = vaRes.data.pubkey;
         if (pubkey) {
