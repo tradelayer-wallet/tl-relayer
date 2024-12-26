@@ -1,5 +1,5 @@
 import { FastifyInstance, FastifyRequest } from "fastify";
-import { getTx } from "../services/tx.service";
+import { getTx, broadcastTx } from "../services/tx.service";
 
 export const txRoute = (fastify: FastifyInstance, opts: any, done: any) => {
     fastify.get('/:txid', async (request: FastifyRequest<{ Params: { txid: string } }>, reply) => {
