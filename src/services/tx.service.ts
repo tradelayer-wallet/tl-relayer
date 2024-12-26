@@ -155,9 +155,11 @@ const getMinVoutAmount = async (toAddress: string, isApiMode: boolean) => {
     const minAmount = parseFloat(drwRes.data.vout[0].value);
     return { data: minAmount };
     */
-  } catch (error) {
-    return { error: error.message || 'Undefined getMinVoutAmount Error' };
-  }
+ } catch (error: unknown) {
+  const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
+  console.error(errorMessage);
+}
+
 };
 
 /**
