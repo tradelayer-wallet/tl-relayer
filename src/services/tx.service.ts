@@ -34,6 +34,7 @@ export const networks: Record<string, Network> = {
     pubKeyHash: 0x30,
     scriptHash: 0x32,
     wif: 0xb0,
+    bech32: 'ltc', // Add this
   },
   LTCTEST: {
     messagePrefix: '\x19Litecoin Signed Message:\n',
@@ -44,9 +45,9 @@ export const networks: Record<string, Network> = {
     pubKeyHash: 0x6f,
     scriptHash: 0x3a,
     wif: 0xef,
+    bech32: 'tltc', // Add this
   },
 };
-
 
 export interface IBuildTxConfig {
   fromKeyPair: {
@@ -200,7 +201,6 @@ const getEnoughInputs2 = (_inputs: IInput[], amount: number) => {
  * - Returns a PSBT hex (not signed).
  ********************************************************************/
 import { Psbt, Transaction } from 'bitcoinjs-lib';
-import { networks } from '../utils/networks';  // or wherever your network config is
 
 export const buildPsbt = (buildPsbtOptions: {
   rawtx: string,
@@ -287,11 +287,7 @@ export const buildLTCInstatTx = async (
     const utxos = [...commitUTXOs, ..._utxos];
 
     // 3) Figure out minimal LTC amount needed and gather enough inputs
-    const minAmountRes = await getMinVoutAmount(sellerAddress, isApiMode);
-    if (minAmountRes.error || !minAmountRes.data) {
-      throw new Error(`getMinVoutAmount: ${minAmountRes.error}`);
-    }
-    const minAmount = minAmountRes.data;
+    const minAmount = 0.000546 
     const buyerLtcAmount = minAmount;
     const sellerLtcAmount = Math.max(amount, minAmount);
     const minAmountForAllOuts = safeNumber(buyerLtcAmount + sellerLtcAmount);
@@ -398,11 +394,8 @@ export const buildTx = async (txConfig: IBuildTxConfig, isApiMode: boolean) => {
     const utxos = [..._inputs, ..._utxos];
 
     // 3) Minimum amount logic if relevant
-    const minAmountRes = await getMinVoutAmount(toAddress, isApiMode);
-    if (minAmountRes.error || !minAmountRes.data) {
-      throw new Error(`getMinVoutAmount: ${minAmountRes.error}`);
-    }
-    const minAmount = minAmountRes.data;
+
+    const minAmount =0.000546 
     if ((minAmount > (amount || 0)) && !payload) {
       throw new Error(`Minimum amount is: ${minAmount}`);
     }
