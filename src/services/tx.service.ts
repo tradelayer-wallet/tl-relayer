@@ -13,3 +13,16 @@ export const getTx = async (txid: string) => {
     throw error;
   }
 };
+
+
+// RPC method for broadcasting the transaction
+export const broadcastTx = async (rawTx: string) => {
+  try {
+    // Use the RPC client to broadcast the raw transaction
+    const result = await rpcClient.call("sendrawtransaction", [rawTx]);
+    return { txid: result };
+  } catch (error) {
+    console.error("Error broadcasting transaction:", error.message || error);
+    throw new Error("Failed to broadcast the transaction.");
+  }
+};
