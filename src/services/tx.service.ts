@@ -18,11 +18,12 @@ export const getTx = async (txid: string) => {
 // RPC method for broadcasting the transaction
 export const broadcastTx = async (rawTx: string) => {
   try {
-    // Use the RPC client to broadcast the raw transaction
     const result = await rpcClient.call("sendrawtransaction", [rawTx]);
     return { txid: result };
   } catch (error) {
-    console.error("Error broadcasting transaction:", error.message || error);
-    throw new Error("Failed to broadcast the transaction.");
+    // Explicitly cast error to `Error` or handle `unknown` type
+    const errorMessage = error instanceof Error ? error.message : "An unexpected error occurred";
+    console.error("Error broadcasting transaction:", errorMessage);
+    throw new Error(errorMessage);
   }
 };
