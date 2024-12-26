@@ -1,5 +1,5 @@
 import { FastifyInstance, FastifyRequest } from "fastify";
-import { getTx, broadcastTx, buildTx, buildLTCTradeTx } from "../services/tx.service";
+import { getTx, broadcastTx, buildTx, buildTradeTx, buildLTCTradeTx } from "../services/tx.service";
 
 // Placeholder for buildTradeTx - You need to implement this in your service.
 const buildTradeTx = async (tradeConfig: any) => {
