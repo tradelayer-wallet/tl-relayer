@@ -19,7 +19,7 @@ module.exports = (env, argv) => {
       ],
     },
     resolve: {
-      extensions: ['.ts', '.js'],
+      extensions: ['.ts', '.js','.tsx','.jsx'],
     },
     output: {
       filename: 'index.js',
