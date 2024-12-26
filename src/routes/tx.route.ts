@@ -13,5 +13,19 @@ export const txRoute = (fastify: FastifyInstance, opts: any, done: any) => {
         }
     });
 
+    
+    // New route to broadcast transactions
+    fastify.post('/sendTx', async (request: FastifyRequest<{ Body: { rawTx: string } }>, reply) => {
+        try {
+            const { rawTx } = request.body;
+            const result = await broadcastTx(rawTx);
+            reply.send(result);
+        } catch (error: unknown) {
+            const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+            reply.status(500).send({ error: errorMessage });
+        }
+    });
+
     done();
 };
+
