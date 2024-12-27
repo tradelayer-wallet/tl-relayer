@@ -35,18 +35,18 @@ export const txRoute = (fastify: FastifyInstance, opts: any, done: any) => {
     });
 
     // Build generic transaction
-    fastify.post('/buildTx', async (request: FastifyRequest<{ Body: IBuildTxConfig }>, reply) => {
-        try {
-              const { params } = request.body;
-        console.log('txConfig in route:', params);
-            const result = await buildTx(txConfig, true);
-            console.log('result '+JSON.stringify(result))
-            reply.send(result);
-        } catch (error: unknown) {
-            const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
-            reply.status(500).send({ error: errorMessage });
-        }
-    });
+   fastify.post('/buildTx', async (request: FastifyRequest<{ Body: { params: IBuildTxConfig } }>, reply) => {
+    try {
+        const { params } = request.body; // Extract params
+        console.log('txConfig:', params); // Log txConfig for debugging
+        const result = await buildTx(params, true);
+        reply.send(result);
+    } catch (error) {
+        console.error('Error in /buildTx route:', error);
+        reply.status(500).send({ error: 'Failed to build transaction' });
+    }
+});
+
 
     // Build trade transaction
     fastify.post('/buildTradeTx', async (request: FastifyRequest<{ Body: IBuildLTCITTxConfig }>, reply) => {
