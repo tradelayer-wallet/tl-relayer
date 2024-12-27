@@ -70,6 +70,7 @@ export interface IBuildLTCITTxConfig {
   amount: number;
   payload: string;
   commitUTXOs: IInput[],
+  inputs: IInput[]
   network: string;
 }
 
