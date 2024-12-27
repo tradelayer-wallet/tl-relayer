@@ -37,8 +37,8 @@ export const txRoute = (fastify: FastifyInstance, opts: any, done: any) => {
     // Build generic transaction
     fastify.post('/buildTx', async (request: FastifyRequest<{ Body: IBuildTxConfig }>, reply) => {
         try {
-            const txConfig = request.body.params;
-            console.log('tx config ' +JSON.stringify(txConfig))
+              const { params } = request.body;
+        console.log('txConfig in route:', params);
             const result = await buildTx(txConfig, true);
             console.log('result '+JSON.stringify(result))
             reply.send(result);
