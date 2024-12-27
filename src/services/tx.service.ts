@@ -480,7 +480,9 @@ export const buildTx = async (txConfig: IBuildTxConfig, isApiMode: boolean) => {
   } catch (error: any) {
     return { error: error.message || 'Undefined build Tx Error' };
   }
-};const buildTradeTx = async (tradeConfig: any) => {
+};
+
+export const buildTradeTx = async (tradeConfig: any) => {
     try {
         const { inputs, outputs, payload, network, isApiMode } = tradeConfig;
 
