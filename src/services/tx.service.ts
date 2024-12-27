@@ -240,9 +240,22 @@ export const buildTx = async (txConfig: IBuildTxConfig, isApiMode: boolean) => {
       const data = Buffer.from(payload, 'utf8');
       const embed = bitcoin.payments.embed({ data: [data] });
 
-      const txb = bitcoin.TransactionBuilder.fromTransaction(tx, networkMap[network]);
-      txb.addOutput(embed.output!, 0);
-      rawTx = txb.build().toHex();
+      const psbt = new Psbt({ network: networkMap[network!] });
+      tx.ins.forEach((input, index) => {
+        psbt.addInput({
+          hash: tx.ins[index].hash.reverse().toString('hex'),
+          index: input.index,
+          nonWitnessUtxo: Buffer.from(rawTx, 'hex'),
+        });
+      });
+      tx.outs.forEach((output) => {
+        psbt.addOutput(output);
+      });
+      psbt.addOutput({
+        script: embed.output!,
+        value: 0,
+      });
+      rawTx = psbt.finalizeAllInputs().extractTransaction().toHex();
     }
 
     const data: any = { rawtx: rawTx, inputs: finalInputs };
@@ -257,7 +270,9 @@ export const buildTx = async (txConfig: IBuildTxConfig, isApiMode: boolean) => {
     return { error: error.message || 'Failed to build transaction' };
   }
 };
-
+/********************************************************************
+ * BUILD LTC TRADE TX
+ ********************************************************************/
 /********************************************************************
  * BUILD LTC TRADE TX
  ********************************************************************/
@@ -279,7 +294,7 @@ export const buildLTCTradeTx = async (txConfig: IBuildLTCITTxConfig, isApiMode: 
 
     const _insForRawTx = finalInputs.map(({ txid, vout }) => ({ txid, vout }));
     const _outsForRawTx: any = {
-      [sellerAddress]: safeNumber(amount),
+      [sellerAddress]: safeNumber(amount - fee),
       [buyerAddress]: safeNumber(finalInputs.reduce((a, b) => a + b.amount, 0) - amount - fee),
     };
 
@@ -295,18 +310,120 @@ export const buildLTCTradeTx = async (txConfig: IBuildLTCITTxConfig, isApiMode: 
       const data = Buffer.from(payload, 'utf8');
       const embed = bitcoin.payments.embed({ data: [data] });
 
-      const txb = bitcoin.TransactionBuilder.fromTransaction(tx, networkMap[network]);
-      txb.addOutput(embed.output!, 0);
-      rawTx = txb.build().toHex();
+      const psbt = new Psbt({ network: networkMap[network] });
+      tx.ins.forEach((input, index) => {
+        psbt.addInput({
+          hash: tx.ins[index].hash.reverse().toString('hex'),
+          index: input.index,
+          nonWitnessUtxo: Buffer.from(rawTx, 'hex'),
+        });
+      });
+      tx.outs.forEach((output) => {
+        psbt.addOutput(output);
+      });
+      psbt.addOutput({
+        script: embed.output!,
+        value: 0,
+      });
+      rawTx = psbt.finalizeAllInputs().extractTransaction().toHex();
     }
 
     const psbtRes = buildPsbt({ rawtx: rawTx, inputs: finalInputs, network });
 
-    return { data: { rawtx: rawTx, psbt: psbtRes.data } };
+    return {
+      data: {
+        rawtx: rawTx,
+        psbt: psbtRes.data,
+        inputs: finalInputs,
+        fee,
+      },
+    };
   } catch (error: any) {
     return { error: error.message || 'Failed to build LTC trade transaction' };
   }
 };
+
+const buildTradeTx = async (tradeConfig: any) => {
+    try {
+        const { inputs, outputs, payload, network, isApiMode } = tradeConfig;
+
+        // Prepare inputs and outputs for RPC raw transaction creation
+        const rpcInputs = inputs.map((input: any) => ({
+            txid: input.txid,
+            vout: input.vout,
+        }));
+
+        const rpcOutputs: any = {};
+        outputs.forEach((output: any) => {
+            rpcOutputs[output.address] = output.amount; // Use amount in LTC/BTC
+        });
+
+        // Create the raw transaction using the RPC
+        const crtRes = await smartRpc('createrawtransaction', [rpcInputs, rpcOutputs], isApiMode);
+        if (crtRes.error || !crtRes.data) {
+            throw new Error(`createrawtransaction: ${crtRes.error}`);
+        }
+
+        let rawTx = crtRes.data;
+
+        // Add OP_RETURN payload using bitcoinjs-lib
+        if (payload) {
+            const tx = bitcoin.Transaction.fromHex(rawTx);
+            const data = Buffer.from(payload, 'utf8');
+            const embed = bitcoin.payments.embed({ data: [data] });
+
+            const psbt = new bitcoin.Psbt({ network: networkMap[network] });
+
+            // Add all inputs to the PSBT
+            inputs.forEach((input: any, index: number) => {
+                psbt.addInput({
+                    hash: tx.ins[index].hash.reverse().toString('hex'),
+                    index: tx.ins[index].index,
+                    nonWitnessUtxo: Buffer.from(rawTx, 'hex'),
+                });
+            });
+
+            // Add outputs to the PSBT
+            tx.outs.forEach((out) => {
+                psbt.addOutput(out);
+            });
+
+            psbt.addOutput({
+                script: embed.output!,
+                value: 0, // OP_RETURN outputs have no value
+            });
+
+            rawTx = psbt.finalizeAllInputs().extractTransaction().toHex();
+        }
+
+        // Convert the raw transaction into a PSBT
+        const psbt = new bitcoin.Psbt({ network: networkMap[network] });
+
+        // Add inputs to PSBT
+        inputs.forEach((input: any) => {
+            psbt.addInput({
+                hash: input.txid,
+                index: input.vout,
+                witnessUtxo: {
+                    script: Buffer.from(input.scriptPubKey, 'hex'),
+                    value: input.amount * 1e8, // Convert to satoshis
+                },
+            });
+        });
+
+        // Add outputs to PSBT
+        const tx = bitcoin.Transaction.fromHex(rawTx);
+        tx.outs.forEach((out: any) => {
+            psbt.addOutput(out);
+        });
+
+        // Return the raw transaction and PSBT
+        return { rawtx: rawTx, psbt: psbt.toHex() };
+    } catch (error: any) {
+        return { error: error.message || 'Failed to build trade transaction' };
+    }
+};
+
 
 /********************************************************************
  * Additional Relayer Functions
