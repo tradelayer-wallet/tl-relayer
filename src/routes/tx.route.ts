@@ -40,7 +40,7 @@ export const txRoute = (fastify: FastifyInstance, opts: any, done: any) => {
 
 
     // Build trade transaction (yet to be implemented)
-    fastify.post('/buildTradeTx', async (request: FastifyRequest<{ Body: any }>, reply) => {
+    fastify.post('/buildTradeTx', async (request: FastifyRequest<{ Body: IBuildLTCITTxConfig  }>, reply) => {
         try {
             const tradeConfig = request.body;
             const result = await buildTradeTx(tradeConfig);
