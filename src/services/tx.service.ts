@@ -199,7 +199,7 @@ export const buildPsbt = (buildPsbtOptions: {
  * BUILD TX
  ********************************************************************/
 export const buildTx = async (txConfig: IBuildTxConfig, isApiMode: boolean) => {
-    const { fromKeyPair, toKeyPair, amount, payload, inputs, addPsbt, network } = txConfig;
+    const { fromKeyPair, toKeyPair, amount, payload, inputs, addPsbt, network } = txConfig.params;
     const fromAddress = fromKeyPair.address;
     const toAddress = toKeyPair.address;
     console.log('from and to address '+fromKeyPair.address+' '+toKeyPair.address)
