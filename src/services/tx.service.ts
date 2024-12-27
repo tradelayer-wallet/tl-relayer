@@ -354,29 +354,26 @@ export const buildTx = async (txConfig: IBuildTxConfig, isApiMode: boolean) => {
     return { error: error.message || 'Failed to build LTC trade transaction' };
   }
 };
-
-export const buildTradeTx = async (tradeConfig: any) => {
+export const buildTradeTx = async (tradeConfig: IBuildLTCITTxConfig) => {
   try {
     const { inputs, outputs, payload, network, isApiMode } = tradeConfig;
 
     console.log('Trade Config Inputs:', JSON.stringify(inputs));
     console.log('Trade Config Outputs:', JSON.stringify(outputs));
 
-    // Prepare inputs and outputs for raw transaction
-    const rpcInputs = inputs.map((input: any) => ({
+    const rpcInputs = inputs.map((input) => ({
       txid: input.txid,
       vout: input.vout,
     }));
 
     const rpcOutputs: any = {};
-    outputs.forEach((output: any) => {
+    outputs.forEach((output) => {
       rpcOutputs[output.address] = output.amount;
     });
 
     console.log('RPC Inputs:', JSON.stringify(rpcInputs));
     console.log('RPC Outputs:', JSON.stringify(rpcOutputs));
 
-    // Create raw transaction
     const crtRes = await smartRpc('createrawtransaction', [rpcInputs, rpcOutputs], isApiMode);
     if (crtRes.error || !crtRes.data) {
       throw new Error(`createrawtransaction: ${crtRes.error}`);
@@ -412,7 +409,6 @@ export const buildTradeTx = async (tradeConfig: any) => {
     return { error: error.message || 'Failed to build trade transaction' };
   }
 };
-
 
 
 /********************************************************************
