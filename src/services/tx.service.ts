@@ -256,7 +256,7 @@ export const buildPsbt = (buildPsbtOptions: {
  *  3) Creates raw transaction & attaches OP_RETURN (payload)
  *  4) Returns the final rawTx and optional PSBT for signing
  ********************************************************************/
-export const buildLTCInstatTx = async (
+export const buildLTCTradeTx = async (
   txConfig: IBuildLTCITTxConfig,
   isApiMode: boolean
 ) => {
