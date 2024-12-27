@@ -38,7 +38,9 @@ export const txRoute = (fastify: FastifyInstance, opts: any, done: any) => {
     fastify.post('/buildTx', async (request: FastifyRequest<{ Body: IBuildTxConfig }>, reply) => {
         try {
             const txConfig = request.body;
+            console.log('tx config ' +JSON.stringify(txConfig))
             const result = await buildTx(txConfig, true);
+            console.log('result '+JSON.stringify(result))
             reply.send(result);
         } catch (error: unknown) {
             const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
