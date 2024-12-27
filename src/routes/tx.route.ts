@@ -1,12 +1,6 @@
 import { FastifyInstance, FastifyRequest } from "fastify";
 import { getTx, broadcastTx, buildTx, buildTradeTx, buildLTCTradeTx } from "../services/tx.service";
 
-// Placeholder for buildTradeTx - You need to implement this in your service.
-const buildTradeTx = async (tradeConfig: any) => {
-    // Implement the logic for building trade transactions.
-    return { data: "TradeTx not implemented yet" };
-};
-
 export const txRoute = (fastify: FastifyInstance, opts: any, done: any) => {
     // Get transaction by txid
     fastify.get('/:txid', async (request: FastifyRequest<{ Params: { txid: string } }>, reply) => {
