@@ -199,28 +199,19 @@ export const buildPsbt = (buildPsbtOptions: {
  * BUILD TX
  ********************************************************************/
 export const buildTx = async (txConfig: IBuildTxConfig, isApiMode: boolean) => {
-    const { fromKeyPair, toKeyPair, amount, payload, inputs, addPsbt, network } = txConfig;
+   
+  try {
+   const { fromKeyPair, toKeyPair, amount, payload, inputs, addPsbt, network } = txConfig;
     const fromAddress = fromKeyPair.address;
     const toAddress = toKeyPair.address;
     console.log('from and to address '+fromKeyPair.address+' '+toKeyPair.address)
-  try {
-  
-    const vaRes1 = await smartRpc('validateaddress', [fromAddress], isApiMode);
-    if (vaRes1.error || !vaRes1.data?.isvalid) {
-      throw new Error(`validateaddress(from): ${vaRes1.error}`);
-    }
-    const vaRes2 = await smartRpc('validateaddress', [toAddress], isApiMode);
-    if (vaRes2.error || !vaRes2.data?.isvalid) {
-      throw new Error(`validateaddress(to): ${vaRes2.error}`);
-    }
-
     const luRes = await smartRpc('listunspent', [0, 999999999, [fromAddress]], isApiMode);
     if (luRes.error || !luRes.data) {
       throw new Error(`listunspent(from): ${luRes.error}`);
     }
 
     const _utxos = (luRes.data as IInput[]).sort((a, b) => b.amount - a.amount);
-
+    console.log('show utxos '+utxos
     const inputsRes = getEnoughInputs2(_utxos, amount!);
     const { finalInputs, fee } = inputsRes;
 
