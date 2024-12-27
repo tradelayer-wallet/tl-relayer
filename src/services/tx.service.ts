@@ -5,6 +5,7 @@
  * and txBuilder service so that it can be used on the Relayer side, 
  * without including any signing logic.
  ********************************************************************/
+import * as bitcoin from 'bitcoinjs-lib';
 
 import axios from 'axios';
 import { rpcClient } from "../config/rpc.config";  // Your configured RPC client
