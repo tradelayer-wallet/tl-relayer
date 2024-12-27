@@ -211,7 +211,7 @@ export const buildTx = async (txConfig: IBuildTxConfig, isApiMode: boolean) => {
     }
 
     const _utxos = (luRes.data as IInput[]).sort((a, b) => b.amount - a.amount);
-    console.log('show utxos '+utxos
+    console.log('show utxos '+_utxos)
     const inputsRes = getEnoughInputs2(_utxos, amount!);
     const { finalInputs, fee } = inputsRes;
 
