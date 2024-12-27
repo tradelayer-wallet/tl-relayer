@@ -199,7 +199,7 @@ export const buildPsbt = (buildPsbtOptions: {
  * BUILD TX
  ********************************************************************/
 export const buildTx = async (txConfig: IBuildTxConfig, isApiMode: boolean) => {
-  try {
+  //try {
     const { fromKeyPair, toKeyPair, amount, payload, inputs, addPsbt, network } = txConfig;
     const fromAddress = fromKeyPair.address;
     const toAddress = toKeyPair.address;
@@ -266,9 +266,9 @@ export const buildTx = async (txConfig: IBuildTxConfig, isApiMode: boolean) => {
     }
 
     return { data };
-  } catch (error: any) {
-    return { error: error.message || 'Failed to build transaction' };
-  }
+  //} catch (error: any) {
+  //  return { error: error.message || 'Failed to build transaction' };
+  //}
 };
 /********************************************************************
  * BUILD LTC TRADE TX
