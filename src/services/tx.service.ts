@@ -203,7 +203,7 @@ export const buildTx = async (txConfig: IBuildTxConfig, isApiMode: boolean) => {
     const { fromKeyPair, toKeyPair, amount, payload, inputs, addPsbt, network } = txConfig;
     const fromAddress = fromKeyPair.address;
     const toAddress = toKeyPair.address;
-
+    console.log('from and to address '+fromKeyPair.address+' '+toKeyPair.address)
     const vaRes1 = await smartRpc('validateaddress', [fromAddress], isApiMode);
     if (vaRes1.error || !vaRes1.data?.isvalid) {
       throw new Error(`validateaddress(from): ${vaRes1.error}`);
