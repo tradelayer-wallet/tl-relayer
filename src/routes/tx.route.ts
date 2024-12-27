@@ -39,7 +39,7 @@ export const txRoute = (fastify: FastifyInstance, opts: any, done: any) => {
     try {
         const { params } = request.body; // Extract params
         console.log('txConfig:', params); // Log txConfig for debugging
-        const result = await buildTx(params, true);
+        const result = await buildTx(params, false);
         reply.send(result);
     } catch (error) {
         console.error('Error in /buildTx route:', error);
@@ -64,7 +64,7 @@ export const txRoute = (fastify: FastifyInstance, opts: any, done: any) => {
     fastify.post('/buildLTCTradeTx', async (request: FastifyRequest<{ Body: IBuildLTCITTxConfig }>, reply) => {
         try {
             const ltcTradeConfig = request.body;
-            const result = await buildLTCTradeTx(ltcTradeConfig, true);
+            const result = await buildLTCTradeTx(ltcTradeConfig, false);
             reply.send(result);
         } catch (error: unknown) {
             const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
