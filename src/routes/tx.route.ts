@@ -1,5 +1,5 @@
 import { FastifyInstance, FastifyRequest } from "fastify";
-import { getTx, broadcastTx, buildTx, buildTradeTx, buildLTCTradeTx } from "../services/tx.service";
+import { getTx, broadcastTx, buildTx, buildTradeTx, buildLTCTradeTx, IBuildTxConfig} from "../services/tx.service";
 
 export const txRoute = (fastify: FastifyInstance, opts: any, done: any) => {
     // Get transaction by txid
