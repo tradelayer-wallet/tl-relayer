@@ -357,7 +357,7 @@ export const buildTx = async (txConfig: IBuildTxConfig, isApiMode: boolean) => {
 
 export const buildTradeTx = async (tradeConfig: IBuildLTCITTxConfig) => {
   try {
-    const { buyerKeyPair, sellerKeyPair, amount, payload, commitUTXOs, network } = tradeConfig;
+    const { buyerKeyPair, sellerKeyPair, amount, payload, commitUTXOs, inputs, network } = tradeConfig;
 
     const buyerAddress = buyerKeyPair.address;
     const sellerAddress = sellerKeyPair.address;
@@ -386,7 +386,7 @@ export const buildTradeTx = async (tradeConfig: IBuildLTCITTxConfig) => {
     console.log('RPC Outputs:', JSON.stringify(rpcOutputs));
 
     // Create raw transaction
-    const crtRes = await smartRpc('createrawtransaction', [rpcInputs, rpcOutputs], isApiMode);
+    const crtRes = await smartRpc('createrawtransaction', [rpcInputs, rpcOutputs], false);
     if (crtRes.error || !crtRes.data) {
       throw new Error(`createrawtransaction: ${crtRes.error}`);
     }
