@@ -356,24 +356,35 @@ export const buildTx = async (txConfig: IBuildTxConfig, isApiMode: boolean) => {
 };
 export const buildTradeTx = async (tradeConfig: IBuildLTCITTxConfig) => {
   try {
-    const { inputs, outputs, payload, network, isApiMode } = tradeConfig;
+    const { buyerKeyPair, sellerKeyPair, amount, payload, inputs, commitUTXOs, network, isApiMode } = tradeConfig;
 
-    console.log('Trade Config Inputs:', JSON.stringify(inputs));
-    console.log('Trade Config Outputs:', JSON.stringify(outputs));
+    const buyerAddress = buyerKeyPair.address;
+    const sellerAddress = sellerKeyPair.address;
 
-    const rpcInputs = inputs.map((input) => ({
-      txid: input.txid,
-      vout: input.vout,
-    }));
+    // Combine inputs from `inputs` and `commitUTXOs`
+    const allInputs = [...(inputs || []), ...commitUTXOs];
+    console.log('All Inputs:', JSON.stringify(allInputs));
 
-    const rpcOutputs: any = {};
-    outputs.forEach((output) => {
-      rpcOutputs[output.address] = output.amount;
-    });
+    const rpcInputs = allInputs.map(({ txid, vout }) => ({ txid, vout }));
+
+    // Outputs: amount to seller and change back to buyer
+    const totalInputAmount = allInputs.reduce((sum, utxo) => sum + utxo.amount, 0);
+    const fee = 0.0001; // Adjust fee as necessary
+    const change = totalInputAmount - amount - fee;
+
+    if (change < 0) {
+      throw new Error('Insufficient funds for transaction');
+    }
+
+    const rpcOutputs: any = {
+      [sellerAddress]: amount,
+      [buyerAddress]: change,
+    };
 
     console.log('RPC Inputs:', JSON.stringify(rpcInputs));
     console.log('RPC Outputs:', JSON.stringify(rpcOutputs));
 
+    // Create raw transaction
     const crtRes = await smartRpc('createrawtransaction', [rpcInputs, rpcOutputs], isApiMode);
     if (crtRes.error || !crtRes.data) {
       throw new Error(`createrawtransaction: ${crtRes.error}`);
@@ -386,29 +397,14 @@ export const buildTradeTx = async (tradeConfig: IBuildLTCITTxConfig) => {
       const data = Buffer.from(payload, 'utf8');
       const embed = bitcoin.payments.embed({ data: [data] });
 
-      const psbt = new Psbt({ network: networkMap[network] });
-      inputs.forEach((input) => {
+      const psbt = new bitcoin.Psbt({ network: networkMap[network] });
+      allInputs.forEach((input, index) => {
         psbt.addInput({
           hash: input.txid,
           index: input.vout,
-        });
-      });
-
-      tx.outs.forEach((output) => psbt.addOutput(output));
-      psbt.addOutput({
-        script: embed.output!,
-        value: 0,
-      });
-
-      rawTx = psbt.toHex();
-    }
-
-    return { data: { rawtx: rawTx } };
-  } catch (error: any) {
-    console.error('Error in buildTradeTx:', error.message || error);
-    return { error: error.message || 'Failed to build trade transaction' };
-  }
-};
+          witnessUtxo: {
+            script: Buffer.from(input.scriptPubKey, 'hex'),
+            value: Math.round(input.amount * 1e8),
 
 
 /********************************************************************
