@@ -211,13 +211,13 @@ export const buildTx = async (txConfig: IBuildTxConfig, isApiMode: boolean) => {
     }
 
     const _utxos = (luRes.data as IInput[]).sort((a, b) => b.amount - a.amount);
-    console.log('show utxos '+_utxos)
+    console.log('show utxos '+JSON.stringify(_utxos))
     const inputsRes = getEnoughInputs2(_utxos, amount!);
     const { finalInputs, fee } = inputsRes;
 
     const _insForRawTx = finalInputs.map(({ txid, vout }) => ({ txid, vout }));
     const _outsForRawTx: any = { [toAddress]: safeNumber(amount! - fee) };
-
+    console.log('ins and outs '+JSON.stringify(_insForRawTx)+' '+_outsForRawTx)
     if (finalInputs.length === 0) throw new Error('Not enough inputs');
 
     const crtRes = await smartRpc('createrawtransaction', [_insForRawTx, _outsForRawTx], isApiMode);
@@ -226,6 +226,8 @@ export const buildTx = async (txConfig: IBuildTxConfig, isApiMode: boolean) => {
     }
 
     let rawTx = crtRes.data;
+
+    console.log('rawTx '+rawTx)
 
     if (payload) {
       const tx = bitcoin.Transaction.fromHex(rawTx);
