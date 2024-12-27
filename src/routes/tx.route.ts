@@ -33,16 +33,17 @@ export const txRoute = (fastify: FastifyInstance, opts: any, done: any) => {
     });
 
     // Build generic transaction
-    fastify.post('/buildTx', async (request: FastifyRequest<{ Body: any }>, reply) => {
-        try {
-            const txConfig = request.body;
-            const result = await buildTx(txConfig, true);
-            reply.send(result);
-        } catch (error: unknown) {
-            const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
-            reply.status(500).send({ error: errorMessage });
-        }
-    });
+ fastify.post('/buildTx', async (request: FastifyRequest<{ Body: IBuildTxConfig }>, reply) => {
+    try {
+        const txConfig = request.body;
+        const result = await buildTx(txConfig, true);
+        reply.send(result);
+    } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+        reply.status(500).send({ error: errorMessage });
+    }
+});
+
 
     // Build trade transaction (yet to be implemented)
     fastify.post('/buildTradeTx', async (request: FastifyRequest<{ Body: any }>, reply) => {
