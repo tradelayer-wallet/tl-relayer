@@ -1,5 +1,13 @@
 import { FastifyInstance, FastifyRequest } from "fastify";
-import { getTx, broadcastTx, buildTx, buildTradeTx, buildLTCTradeTx, IBuildTxConfig} from "../services/tx.service";
+import {
+    getTx,
+    broadcastTx,
+    buildTx,
+    buildTradeTx,
+    buildLTCTradeTx,
+    IBuildTxConfig,
+    IBuildLTCITTxConfig,
+} from "../services/tx.service";
 
 export const txRoute = (fastify: FastifyInstance, opts: any, done: any) => {
     // Get transaction by txid
@@ -27,20 +35,19 @@ export const txRoute = (fastify: FastifyInstance, opts: any, done: any) => {
     });
 
     // Build generic transaction
- fastify.post('/buildTx', async (request: FastifyRequest<{ Body: IBuildTxConfig }>, reply) => {
-    try {
-        const txConfig = request.body;
-        const result = await buildTx(txConfig, true);
-        reply.send(result);
-    } catch (error: unknown) {
-        const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
-        reply.status(500).send({ error: errorMessage });
-    }
-});
+    fastify.post('/buildTx', async (request: FastifyRequest<{ Body: IBuildTxConfig }>, reply) => {
+        try {
+            const txConfig = request.body;
+            const result = await buildTx(txConfig, true);
+            reply.send(result);
+        } catch (error: unknown) {
+            const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+            reply.status(500).send({ error: errorMessage });
+        }
+    });
 
-
-    // Build trade transaction (yet to be implemented)
-    fastify.post('/buildTradeTx', async (request: FastifyRequest<{ Body: IBuildLTCITTxConfig  }>, reply) => {
+    // Build trade transaction
+    fastify.post('/buildTradeTx', async (request: FastifyRequest<{ Body: IBuildLTCITTxConfig }>, reply) => {
         try {
             const tradeConfig = request.body;
             const result = await buildTradeTx(tradeConfig);
@@ -52,8 +59,7 @@ export const txRoute = (fastify: FastifyInstance, opts: any, done: any) => {
     });
 
     // Build LTC trade transaction
-    fastify.post('/buildLTCTradeTx', async (request: FastifyRequest<{ Body: 'IBuildLTCITTxConfig
- }>, reply) => {
+    fastify.post('/buildLTCTradeTx', async (request: FastifyRequest<{ Body: IBuildLTCITTxConfig }>, reply) => {
         try {
             const ltcTradeConfig = request.body;
             const result = await buildLTCTradeTx(ltcTradeConfig, true);
