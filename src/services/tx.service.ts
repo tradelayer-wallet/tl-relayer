@@ -343,7 +343,7 @@ export const buildLTCTradeTx = async (txConfig: IBuildLTCITTxConfig, isApiMode: 
   }
 };
 
-const buildTradeTx = async (tradeConfig: any) => {
+export const buildTradeTx = async (tradeConfig: any) => {
     try {
         const { inputs, outputs, payload, network, isApiMode } = tradeConfig;
 
