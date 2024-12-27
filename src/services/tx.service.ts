@@ -281,29 +281,42 @@ export const buildTx = async (txConfig: IBuildTxConfig, isApiMode: boolean) => {
  ********************************************************************/
 /********************************************************************
  * BUILD LTC TRADE TX
- ********************************************************************/
-export const buildLTCTradeTx = async (txConfig: IBuildLTCITTxConfig, isApiMode: boolean) => {
+ ********************************************************************/export const buildLTCTradeTx = async (txConfig: IBuildLTCITTxConfig, isApiMode: boolean) => {
   try {
     const { buyerKeyPair, sellerKeyPair, amount, payload, commitUTXOs, network } = txConfig;
-
     const buyerAddress = buyerKeyPair.address;
     const sellerAddress = sellerKeyPair.address;
 
+    console.log(`Buyer: ${buyerAddress}, Seller: ${sellerAddress}, Amount: ${amount}`);
+
+    // Fetch UTXOs for the buyer address
     const luRes = await smartRpc('listunspent', [0, 999999999, [buyerAddress]], isApiMode);
     if (luRes.error || !luRes.data) {
       throw new Error(`listunspent(buyer): ${luRes.error}`);
     }
 
     const utxos = [...commitUTXOs, ...luRes.data];
+    console.log('UTXOs:', JSON.stringify(utxos));
+
+    // Select inputs
     const inputsRes = getEnoughInputs2(utxos, amount);
     const { finalInputs, fee } = inputsRes;
 
+    if (finalInputs.length === 0) {
+      throw new Error('Not enough inputs to cover the transaction.');
+    }
+
     const _insForRawTx = finalInputs.map(({ txid, vout }) => ({ txid, vout }));
+    const totalInputAmount = safeNumber(finalInputs.reduce((a, b) => a + b.amount, 0));
     const _outsForRawTx: any = {
       [sellerAddress]: safeNumber(amount - fee),
-      [buyerAddress]: safeNumber(finalInputs.reduce((a, b) => a + b.amount, 0) - amount - fee),
+      [buyerAddress]: safeNumber(totalInputAmount - amount - fee),
     };
 
+    console.log('Inputs:', JSON.stringify(_insForRawTx));
+    console.log('Outputs:', JSON.stringify(_outsForRawTx));
+
+    // Create raw transaction
     const crtRes = await smartRpc('createrawtransaction', [_insForRawTx, _outsForRawTx], isApiMode);
     if (crtRes.error || !crtRes.data) {
       throw new Error(`createrawtransaction: ${crtRes.error}`);
@@ -317,118 +330,89 @@ export const buildLTCTradeTx = async (txConfig: IBuildLTCITTxConfig, isApiMode: 
       const embed = bitcoin.payments.embed({ data: [data] });
 
       const psbt = new Psbt({ network: networkMap[network] });
-      tx.ins.forEach((input, index) => {
+      finalInputs.forEach((input) => {
         psbt.addInput({
-          hash: tx.ins[index].hash.reverse().toString('hex'),
-          index: input.index,
-          nonWitnessUtxo: Buffer.from(rawTx, 'hex'),
+          hash: input.txid,
+          index: input.vout,
         });
       });
-      tx.outs.forEach((output) => {
-        psbt.addOutput(output);
-      });
+
+      tx.outs.forEach((output) => psbt.addOutput(output));
       psbt.addOutput({
         script: embed.output!,
         value: 0,
       });
-      rawTx = psbt.finalizeAllInputs().extractTransaction().toHex();
+
+      rawTx = psbt.toHex();
     }
 
-    const psbtRes = buildPsbt({ rawtx: rawTx, inputs: finalInputs, network });
-
     return {
-      data: {
-        rawtx: rawTx,
-        psbt: psbtRes.data,
-        inputs: finalInputs,
-        fee,
-      },
+      data: { rawtx: rawTx, inputs: finalInputs, fee },
     };
   } catch (error: any) {
+    console.error('Error in buildLTCTradeTx:', error.message || error);
     return { error: error.message || 'Failed to build LTC trade transaction' };
   }
 };
 
 export const buildTradeTx = async (tradeConfig: any) => {
-    try {
-        const { inputs, outputs, payload, network, isApiMode } = tradeConfig;
+  try {
+    const { inputs, outputs, payload, network, isApiMode } = tradeConfig;
 
-        // Prepare inputs and outputs for RPC raw transaction creation
-        const rpcInputs = inputs.map((input: any) => ({
-            txid: input.txid,
-            vout: input.vout,
-        }));
+    console.log('Trade Config Inputs:', JSON.stringify(inputs));
+    console.log('Trade Config Outputs:', JSON.stringify(outputs));
 
-        const rpcOutputs: any = {};
-        outputs.forEach((output: any) => {
-            rpcOutputs[output.address] = output.amount; // Use amount in LTC/BTC
-        });
+    // Prepare inputs and outputs for raw transaction
+    const rpcInputs = inputs.map((input: any) => ({
+      txid: input.txid,
+      vout: input.vout,
+    }));
 
-        // Create the raw transaction using the RPC
-        const crtRes = await smartRpc('createrawtransaction', [rpcInputs, rpcOutputs], isApiMode);
-        if (crtRes.error || !crtRes.data) {
-            throw new Error(`createrawtransaction: ${crtRes.error}`);
-        }
+    const rpcOutputs: any = {};
+    outputs.forEach((output: any) => {
+      rpcOutputs[output.address] = output.amount;
+    });
 
-        let rawTx = crtRes.data;
+    console.log('RPC Inputs:', JSON.stringify(rpcInputs));
+    console.log('RPC Outputs:', JSON.stringify(rpcOutputs));
 
-        // Add OP_RETURN payload using bitcoinjs-lib
-        if (payload) {
-            const tx = bitcoin.Transaction.fromHex(rawTx);
-            const data = Buffer.from(payload, 'utf8');
-            const embed = bitcoin.payments.embed({ data: [data] });
-
-            const psbt = new bitcoin.Psbt({ network: networkMap[network] });
-
-            // Add all inputs to the PSBT
-            inputs.forEach((input: any, index: number) => {
-                psbt.addInput({
-                    hash: tx.ins[index].hash.reverse().toString('hex'),
-                    index: tx.ins[index].index,
-                    nonWitnessUtxo: Buffer.from(rawTx, 'hex'),
-                });
-            });
-
-            // Add outputs to the PSBT
-            tx.outs.forEach((out) => {
-                psbt.addOutput(out);
-            });
-
-            psbt.addOutput({
-                script: embed.output!,
-                value: 0, // OP_RETURN outputs have no value
-            });
-
-            rawTx = psbt.finalizeAllInputs().extractTransaction().toHex();
-        }
-
-        // Convert the raw transaction into a PSBT
-        const psbt = new bitcoin.Psbt({ network: networkMap[network] });
-
-        // Add inputs to PSBT
-        inputs.forEach((input: any) => {
-            psbt.addInput({
-                hash: input.txid,
-                index: input.vout,
-                witnessUtxo: {
-                    script: Buffer.from(input.scriptPubKey, 'hex'),
-                    value: input.amount * 1e8, // Convert to satoshis
-                },
-            });
-        });
-
-        // Add outputs to PSBT
-        const tx = bitcoin.Transaction.fromHex(rawTx);
-        tx.outs.forEach((out: any) => {
-            psbt.addOutput(out);
-        });
-
-        // Return the raw transaction and PSBT
-        return { rawtx: rawTx, psbt: psbt.toHex() };
-    } catch (error: any) {
-        return { error: error.message || 'Failed to build trade transaction' };
+    // Create raw transaction
+    const crtRes = await smartRpc('createrawtransaction', [rpcInputs, rpcOutputs], isApiMode);
+    if (crtRes.error || !crtRes.data) {
+      throw new Error(`createrawtransaction: ${crtRes.error}`);
     }
+
+    let rawTx = crtRes.data;
+
+    if (payload) {
+      const tx = bitcoin.Transaction.fromHex(rawTx);
+      const data = Buffer.from(payload, 'utf8');
+      const embed = bitcoin.payments.embed({ data: [data] });
+
+      const psbt = new Psbt({ network: networkMap[network] });
+      inputs.forEach((input) => {
+        psbt.addInput({
+          hash: input.txid,
+          index: input.vout,
+        });
+      });
+
+      tx.outs.forEach((output) => psbt.addOutput(output));
+      psbt.addOutput({
+        script: embed.output!,
+        value: 0,
+      });
+
+      rawTx = psbt.toHex();
+    }
+
+    return { data: { rawtx: rawTx } };
+  } catch (error: any) {
+    console.error('Error in buildTradeTx:', error.message || error);
+    return { error: error.message || 'Failed to build trade transaction' };
+  }
 };
+
 
 
 /********************************************************************
