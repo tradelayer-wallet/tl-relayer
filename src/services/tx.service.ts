@@ -354,6 +354,7 @@ export const buildTx = async (txConfig: IBuildTxConfig, isApiMode: boolean) => {
     return { error: error.message || 'Failed to build LTC trade transaction' };
   }
 };
+
 export const buildTradeTx = async (tradeConfig: IBuildLTCITTxConfig) => {
   try {
     const { buyerKeyPair, sellerKeyPair, amount, payload, inputs, commitUTXOs, network, isApiMode } = tradeConfig;
@@ -405,6 +406,25 @@ export const buildTradeTx = async (tradeConfig: IBuildLTCITTxConfig) => {
           witnessUtxo: {
             script: Buffer.from(input.scriptPubKey, 'hex'),
             value: Math.round(input.amount * 1e8),
+          },
+        });
+      });
+
+      tx.outs.forEach((output) => psbt.addOutput(output));
+      psbt.addOutput({
+        script: embed.output!,
+        value: 0, // OP_RETURN output
+      });
+
+      rawTx = psbt.toHex();
+    }
+
+    return { data: { rawtx: rawTx, inputs: allInputs } };
+  } catch (error: any) {
+    console.error('Error in buildTradeTx:', error.message || error);
+    return { error: error.message || 'Failed to build trade transaction' };
+  }
+};
 
 
 /********************************************************************
