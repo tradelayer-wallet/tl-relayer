@@ -318,18 +318,24 @@ export const buildLTCInstatTx = async (
     };
 
     // create raw transaction via RPC
-    const crtRes = await smartRpc('createrawtransaction', [_insForRawTx, _outsForRawTx], isApiMode);
-    if (crtRes.error || !crtRes.data) {
-      throw new Error(`createrawtransaction: ${crtRes.error}`);
-    }
+   const crtRes = await smartRpc('createrawtransaction', [_insForRawTx, _outsForRawTx], isApiMode);
+if (crtRes.error || !crtRes.data) {
+    throw new Error(`createrawtransaction: ${crtRes.error}`);
+}
+let finalTx = crtRes.data;
 
-    // attach OP_RETURN (payload) via local JS or a node service
-    const crtxoprRes = await jsTlApi('tl_createrawtx_opreturn', [crtRes.data, payload]);
-    if (crtxoprRes.error || !crtxoprRes.data) {
-      throw new Error(`tl_createrawtx_opreturn: ${crtxoprRes.error}`);
-    }
-
-    const finalTx = crtxoprRes.data; // hex of rawTx
+// Attach OP_RETURN payload
+if (payload) {
+    const data = Buffer.from(payload, 'utf8');
+    const embed = bitcoin.payments.embed({ data: [data] });
+    _outsForRawTx.push({
+        script: embed.output!,
+        value: 0,
+    });
+    finalTx = bitcoin.Transaction.fromHex(finalTx)
+        .addOutput(embed.output!, 0) // Add OP_RETURN to the transaction
+        .toHex(); // Convert back to hex
+}
 
     // 5) (Optional) Build PSBT from finalTx if you want to pass it somewhere for signing
     const psbtHexConfig = {
@@ -432,25 +438,29 @@ export const buildTx = async (txConfig: IBuildTxConfig, isApiMode: boolean) => {
     const _outsForRawTx: any = { [toAddress]: toAmount };
     if (change > 0) _outsForRawTx[fromAddress] = change;
 
-    const crtRes = await smartRpc('createrawtransaction', [_insForRawTx, _outsForRawTx], isApiMode);
+  const crtRes = await smartRpc('createrawtransaction', [_insForRawTx, _outsForRawTx], isApiMode);
     if (crtRes.error || !crtRes.data) {
-      throw new Error(`createrawtransaction: ${crtRes.error}`);
+        throw new Error(`createrawtransaction: ${crtRes.error}`);
     }
     let finalTx = crtRes.data;
 
-    // 7) If there's a payload to attach, do so
+    // Attach OP_RETURN payload
     if (payload) {
-      const crtxoprRes = await jsTlApi('tl_createrawtx_opreturn', [finalTx, payload], isApiMode);
-      if (crtxoprRes.error || !crtxoprRes.data) {
-        throw new Error(`tl_createrawtx_opreturn: ${crtxoprRes.error}`);
-      }
-      finalTx = crtxoprRes.data;
+        const data = Buffer.from(payload, 'utf8');
+        const embed = bitcoin.payments.embed({ data: [data] });
+        _outsForRawTx.push({
+            script: embed.output!,
+            value: 0,
+        });
+        finalTx = bitcoin.Transaction.fromHex(finalTx)
+            .addOutput(embed.output!, 0) // Add OP_RETURN to the transaction
+            .toHex(); // Convert back to hex
     }
 
-    // 8) Return the rawTx and optionally a PSBT
+    // Return the rawTx
     const data: any = {
-      rawtx: finalTx,
-      inputs: finalInputs,
+        rawtx: finalTx,
+        inputs: finalInputs,
     };
 
     if (addPsbt) {
@@ -470,7 +480,69 @@ export const buildTx = async (txConfig: IBuildTxConfig, isApiMode: boolean) => {
   } catch (error: any) {
     return { error: error.message || 'Undefined build Tx Error' };
   }
+};const buildTradeTx = async (tradeConfig: any) => {
+    try {
+        const { inputs, outputs, payload, network, isApiMode } = tradeConfig;
+
+        // Prepare inputs and outputs for RPC raw transaction creation
+        const rpcInputs = inputs.map((input: any) => ({
+            txid: input.txid,
+            vout: input.vout,
+        }));
+
+        const rpcOutputs: any = {};
+        outputs.forEach((output: any) => {
+            rpcOutputs[output.address] = output.amount; // Use amount in LTC/BTC
+        });
+
+        // Create the raw transaction using the RPC
+        const crtRes = await smartRpc('createrawtransaction', [rpcInputs, rpcOutputs], isApiMode);
+        if (crtRes.error || !crtRes.data) {
+            throw new Error(`createrawtransaction: ${crtRes.error}`);
+        }
+
+        let rawTx = crtRes.data;
+
+        // Add OP_RETURN payload using bitcoinjs-lib
+        if (payload) {
+            const tx = bitcoin.Transaction.fromHex(rawTx);
+            const data = Buffer.from(payload, 'utf8');
+            const embed = bitcoin.payments.embed({ data: [data] });
+
+            const builder = bitcoin.TransactionBuilder.fromTransaction(tx, bitcoin.networks[network]);
+            builder.addOutput(embed.output!, 0); // Add OP_RETURN output
+
+            rawTx = builder.build().toHex(); // Rebuild the transaction with OP_RETURN
+        }
+
+        // Convert the raw transaction into a PSBT
+        const psbt = new bitcoin.Psbt({ network: bitcoin.networks[network] });
+
+        // Add inputs to PSBT
+        inputs.forEach((input: any) => {
+            psbt.addInput({
+                hash: input.txid,
+                index: input.vout,
+                witnessUtxo: {
+                    script: Buffer.from(input.scriptPubKey, 'hex'),
+                    value: input.amount * 1e8, // Convert to satoshis
+                },
+            });
+        });
+
+        // Add outputs to PSBT
+        const tx = bitcoin.Transaction.fromHex(rawTx);
+        tx.outs.forEach((out: any) => {
+            psbt.addOutput(out);
+        });
+
+        // Return the raw transaction and PSBT
+        return { rawtx: rawTx, psbt: psbt.toHex() };
+    } catch (error: any) {
+        return { error: error.message || 'Failed to build trade transaction' };
+    }
 };
+
 
 
 /********************************************************************
