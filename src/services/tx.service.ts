@@ -1,12 +1,4 @@
-/********************************************************************
- * relayerTxBuilder.service.ts
- *
- * This file ports the "build" logic from your existing cryptoUtils 
- * and txBuilder service so that it can be used on the Relayer side, 
- * without including any signing logic.
- ********************************************************************/
 import * as bitcoin from 'bitcoinjs-lib';
-
 import axios from 'axios';
 import { rpcClient } from "../config/rpc.config";  // Your configured RPC client
 
@@ -92,6 +84,11 @@ export type TClient = (method: string, ...args: any[]) => Promise<ApiRes>;
  * Example: Smart RPC calls and local "TL" calls
  ********************************************************************/
 
+const networkMap: Record<string, bitcoin.Network> = {
+  LTC: networks.LTC,
+  LTCTEST: networks.LTCTEST,
+};
+
 // Note: If you have a global fastifyServer instance, you can adapt this.
 const relayerApiUrl = process.env.RELAYER_API_URL || null;
 
@@ -104,11 +101,9 @@ export const smartRpc: TClient = async (
   params: any[] = [],
   api = false
 ) => {
-  // If we decide to call the core node directly:
   if (rpcClient && !api) {
     return await rpcClient.call(method, ...params);
   } else {
-    // If an API is available, we can route the request there
     if (relayerApiUrl) {
       const url = `${relayerApiUrl}/rpc/${method}`;
       return axios.post(url, { params }).then((res) => res.data);
@@ -126,7 +121,6 @@ export const jsTlApi: TClient = async (method: string, params: any[] = []) => {
   return axios.post(url, { params }).then((res) => res.data);
 };
 
-
 /********************************************************************
  * Helpers
  ********************************************************************/
@@ -138,47 +132,8 @@ export const safeNumber = (value: number, decimals = 8): number => {
 };
 
 /**
- * Get the minimal vout amount needed for referencing in Omni/LTC-based transactions
- */
-const getMinVoutAmount = async (toAddress: string, isApiMode: boolean) => {
-  try {
-    // For many Omni-based use cases, 0.0000546 LTC is typical. 
-    // You can make this dynamic with an RPC call if needed:
-    return { data: 0.0000546 };
-
-    // Alternatively, calling `tl_createrawtx_reference`:
-    /*
-    const crtxrRes = await smartRpc('tl_createrawtx_reference', ['', toAddress], isApiMode);
-    if (crtxrRes.error || !crtxrRes.data) throw new Error(`tl_createrawtx_reference: ${crtxrRes.error}`);
-
-    const drwRes = await smartRpc('decoderawtransaction', [crtxrRes.data], isApiMode);
-    if (drwRes.error || !drwRes.data) throw new Error(`decoderawtransaction: ${drwRes.error}`);
-
-    const minAmount = parseFloat(drwRes.data.vout[0].value);
-    return { data: minAmount };
-    */
- } catch (error: unknown) {
-  const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
-  console.error(errorMessage);
-}
-
-};
-
-/**
  * Gathers enough UTXOs for a target amount. A simplistic approach:
  */
-const getEnoughInputs = (_inputs: IInput[], amount: number) => {
-  const finalInputs: IInput[] = [];
-  _inputs.forEach((u) => {
-    const currentSum = finalInputs.reduce((a, b) => a + b.amount, 0);
-    if (currentSum < amount) {
-      finalInputs.push(u);
-    }
-  });
-  const fee = safeNumber((0.2 * minFeeLtcPerKb) * finalInputs.length);
-  return { finalInputs, fee };
-};
-
 const getEnoughInputs2 = (_inputs: IInput[], amount: number) => {
   const finalInputs: IInput[] = [];
   _inputs.forEach((u) => {
@@ -191,7 +146,6 @@ const getEnoughInputs2 = (_inputs: IInput[], amount: number) => {
   const fee = safeNumber((0.2 * minFeeLtcPerKb) * finalInputs.length);
   return { finalInputs, fee };
 };
-
 
 /********************************************************************
  * BUILD PSBT
@@ -212,10 +166,8 @@ export const buildPsbt = (buildPsbtOptions: {
     const { rawtx, inputs, network } = buildPsbtOptions;
     const _network = networks[network];  // e.g. LTC, BTC, etc.
 
-    // Create base transaction
     const tx = Transaction.fromHex(rawtx);
 
-    // Initialize an empty Psbt
     const psbt = new Psbt({ network: _network });
 
     inputs.forEach((input: IInput) => {
@@ -227,7 +179,6 @@ export const buildPsbt = (buildPsbtOptions: {
 
       const inputObj: any = { hash, index, witnessUtxo };
 
-      // If you have a witnessScript (e.g. multisig, p2wsh):
       if (input.redeemScript) {
         inputObj.witnessScript = Buffer.from(input.redeemScript, 'hex');
       }
@@ -235,10 +186,8 @@ export const buildPsbt = (buildPsbtOptions: {
       psbt.addInput(inputObj);
     });
 
-    // Add outputs from the original transaction
     psbt.addOutputs(tx.outs);
 
-    // Return the final psbt hex
     const psbtHex = psbt.toHex();
     return { data: psbtHex };
   } catch (error: any) {
@@ -246,130 +195,8 @@ export const buildPsbt = (buildPsbtOptions: {
   }
 };
 
-
 /********************************************************************
- * BUILD LTC "Instant" Tx
- *
- * Example of a specialized method that:
- *  1) Validates buyer & seller addresses
- *  2) Collects UTXOs, including "commitUTXOs"
- *  3) Creates raw transaction & attaches OP_RETURN (payload)
- *  4) Returns the final rawTx and optional PSBT for signing
- ********************************************************************/
-export const buildLTCTradeTx = async (
-  txConfig: IBuildLTCITTxConfig,
-  isApiMode: boolean
-) => {
-  try {
-    const { buyerKeyPair, sellerKeyPair, amount, payload, commitUTXOs, network } = txConfig;
-    const buyerAddress = buyerKeyPair.address;
-    const sellerAddress = sellerKeyPair.address;
-
-    // 1) Validate addresses
-    const vaRes1 = await smartRpc('validateaddress', [buyerAddress], isApiMode);
-    if (vaRes1.error || !vaRes1.data?.isvalid) {
-      throw new Error(`validateaddress(buyer): ${vaRes1.error}`);
-    }
-    const vaRes2 = await smartRpc('validateaddress', [sellerAddress], isApiMode);
-    if (vaRes2.error || !vaRes2.data?.isvalid) {
-      throw new Error(`validateaddress(seller): ${vaRes2.error}`);
-    }
-
-    // 2) Collect UTXOs from buyer + commitUTXOs
-    const luRes = await smartRpc('listunspent', [0, 999999999, [buyerAddress]], false);
-    if (luRes.error || !luRes.data) {
-      throw new Error(`listunspent(buyer): ${luRes.error}`);
-    }
-    const _utxos = (luRes.data as IInput[])
-      .map((i) => ({ ...i, pubkey: buyerKeyPair.pubkey }))
-      .sort((a, b) => b.amount - a.amount);
-
-    // Combine with commitUTXOs (passed in from user)
-    const utxos = [...commitUTXOs, ..._utxos];
-
-    // 3) Figure out minimal LTC amount needed and gather enough inputs
-    const minAmount = 0.000546 
-    const buyerLtcAmount = minAmount;
-    const sellerLtcAmount = Math.max(amount, minAmount);
-    const minAmountForAllOuts = safeNumber(buyerLtcAmount + sellerLtcAmount);
-
-    const inputsRes = getEnoughInputs2(utxos, minAmountForAllOuts);
-    const { finalInputs, fee } = inputsRes;
-    if (!finalInputs.length) throw new Error("Not enough UTXOs. Code 3");
-
-    // Summation of all input amounts
-    const inputsSum = safeNumber(finalInputs.reduce((a, b) => a + b.amount, 0));
-
-    // Decide how much is going to the buyer (change or buyer's leftover) and seller
-    const changeBuyerLtcAmount = safeNumber(
-      inputsSum - sellerLtcAmount - fee
-    ) > buyerLtcAmount
-      ? safeNumber(inputsSum - sellerLtcAmount - fee)
-      : buyerLtcAmount;
-
-    if (inputsSum < safeNumber(fee + sellerLtcAmount + changeBuyerLtcAmount)) {
-      throw new Error("Not enough coins for fees. Code 1");
-    }
-
-    // 4) Build raw transaction
-    const _insForRawTx = finalInputs.map(({ txid, vout }) => ({ txid, vout }));
-    const _outsForRawTx: any = {
-      [buyerAddress]: changeBuyerLtcAmount,
-      [sellerAddress]: sellerLtcAmount,
-    };
-
-    // create raw transaction via RPC
-   const crtRes = await smartRpc('createrawtransaction', [_insForRawTx, _outsForRawTx], isApiMode);
-if (crtRes.error || !crtRes.data) {
-    throw new Error(`createrawtransaction: ${crtRes.error}`);
-}
-let finalTx = crtRes.data;
-
-// Attach OP_RETURN payload
-if (payload) {
-    const data = Buffer.from(payload, 'utf8');
-    const embed = bitcoin.payments.embed({ data: [data] });
-    _outsForRawTx.push({
-        script: embed.output!,
-        value: 0,
-    });
-    finalTx = bitcoin.Transaction.fromHex(finalTx)
-        .addOutput(embed.output!, 0) // Add OP_RETURN to the transaction
-        .toHex(); // Convert back to hex
-}
-
-    // 5) (Optional) Build PSBT from finalTx if you want to pass it somewhere for signing
-    const psbtHexConfig = {
-      rawtx: finalTx,
-      inputs: finalInputs,
-      network: network,
-    };
-    const psbtHexRes = buildPsbt(psbtHexConfig);
-    if (psbtHexRes.error || !psbtHexRes.data) {
-      throw new Error(`buildPsbt: ${psbtHexRes.error}`);
-    }
-
-    const data: any = {
-      rawtx: finalTx,
-      inputs: finalInputs,
-      psbtHex: psbtHexRes.data,
-      // You might also want to return fee, or other info:
-      fee,
-      sellerLtcAmount,
-      buyerLtcAmount: changeBuyerLtcAmount,
-    };
-
-    return { data };
-  } catch (error: any) {
-    return { error: error.message || 'Undefined build Tx Error' };
-  }
-};
-
-
-/********************************************************************
- * BUILD GENERIC TX
- *
- * A more generic method (similar to buildTx in your code).
+ * BUILD TX
  ********************************************************************/
 export const buildTx = async (txConfig: IBuildTxConfig, isApiMode: boolean) => {
   try {
@@ -377,7 +204,6 @@ export const buildTx = async (txConfig: IBuildTxConfig, isApiMode: boolean) => {
     const fromAddress = fromKeyPair.address;
     const toAddress = toKeyPair.address;
 
-    // 1) Validate addresses
     const vaRes1 = await smartRpc('validateaddress', [fromAddress], isApiMode);
     if (vaRes1.error || !vaRes1.data?.isvalid) {
       throw new Error(`validateaddress(from): ${vaRes1.error}`);
@@ -387,180 +213,107 @@ export const buildTx = async (txConfig: IBuildTxConfig, isApiMode: boolean) => {
       throw new Error(`validateaddress(to): ${vaRes2.error}`);
     }
 
-    // 2) Collect UTXOs
     const luRes = await smartRpc('listunspent', [0, 999999999, [fromAddress]], isApiMode);
     if (luRes.error || !luRes.data) {
       throw new Error(`listunspent(from): ${luRes.error}`);
     }
-    // Sort UTXOs largest-first, then optionally merge with externally-supplied inputs
-    const _utxos = (luRes.data as IInput[])
-      .map((i) => ({ ...i, pubkey: fromKeyPair.pubkey }))
-      .sort((a, b) => b.amount - a.amount);
 
-    const _inputs = inputs?.length ? inputs : [];
-    const utxos = [..._inputs, ..._utxos];
+    const _utxos = (luRes.data as IInput[]).sort((a, b) => b.amount - a.amount);
 
-    // 3) Minimum amount logic if relevant
-
-    const minAmount =0.000546 
-    if ((minAmount > (amount || 0)) && !payload) {
-      throw new Error(`Minimum amount is: ${minAmount}`);
-    }
-
-    // Ensure the tx is at least the min
-    const _amount = Math.max(amount || 0, minAmount);
-
-    // 4) Gather enough inputs
-    const inputsRes = getEnoughInputs(utxos, _amount);
+    const inputsRes = getEnoughInputs2(_utxos, amount!);
     const { finalInputs, fee } = inputsRes;
-    if (!finalInputs.length) {
-      throw new Error("Not enough coins for paying fees. Code 3");
-    }
 
-    // 5) Compute outputs
-    const inputsSum = safeNumber(finalInputs.reduce((a, b) => a + b.amount, 0));
-    const _toAmount = safeNumber(_amount - fee);
-    const toAmount = Math.max(minAmount, _toAmount);
-
-    // If no payload, entire leftover is change; if there's a payload, some fee may be used
-    const change = !payload
-      ? safeNumber(inputsSum - _amount)
-      : safeNumber(inputsSum - _amount - fee);
-
-    if (inputsSum < safeNumber(fee + toAmount + change)) {
-      throw new Error("Not enough coins for paying fees. Code 1");
-    }
-    if (inputsSum < _amount) {
-      throw new Error("Not enough coins for paying fees. Code 2");
-    }
-
-    // 6) Build raw transaction via RPC
     const _insForRawTx = finalInputs.map(({ txid, vout }) => ({ txid, vout }));
-    const _outsForRawTx: any = { [toAddress]: toAmount };
-    if (change > 0) _outsForRawTx[fromAddress] = change;
+    const _outsForRawTx: any = { [toAddress]: safeNumber(amount! - fee) };
 
-  const crtRes = await smartRpc('createrawtransaction', [_insForRawTx, _outsForRawTx], isApiMode);
+    if (finalInputs.length === 0) throw new Error('Not enough inputs');
+
+    const crtRes = await smartRpc('createrawtransaction', [_insForRawTx, _outsForRawTx], isApiMode);
     if (crtRes.error || !crtRes.data) {
-        throw new Error(`createrawtransaction: ${crtRes.error}`);
+      throw new Error(`createrawtransaction: ${crtRes.error}`);
     }
-    let finalTx = crtRes.data;
 
-    // Attach OP_RETURN payload
+    let rawTx = crtRes.data;
+
     if (payload) {
-        const data = Buffer.from(payload, 'utf8');
-        const embed = bitcoin.payments.embed({ data: [data] });
-        _outsForRawTx.push({
-            script: embed.output!,
-            value: 0,
-        });
-        finalTx = bitcoin.Transaction.fromHex(finalTx)
-            .addOutput(embed.output!, 0) // Add OP_RETURN to the transaction
-            .toHex(); // Convert back to hex
+      const tx = bitcoin.Transaction.fromHex(rawTx);
+      const data = Buffer.from(payload, 'utf8');
+      const embed = bitcoin.payments.embed({ data: [data] });
+
+      const txb = bitcoin.TransactionBuilder.fromTransaction(tx, networkMap[network]);
+      txb.addOutput(embed.output!, 0);
+      rawTx = txb.build().toHex();
     }
 
-    // Return the rawTx
-    const data: any = {
-        rawtx: finalTx,
-        inputs: finalInputs,
-    };
+    const data: any = { rawtx: rawTx, inputs: finalInputs };
 
     if (addPsbt) {
-      const psbtHexConfig = {
-        rawtx: finalTx,
-        inputs: finalInputs,
-        network: network || "LTCTEST", // or whichever you want default
-      };
-      const psbtHexRes = buildPsbt(psbtHexConfig);
-      if (psbtHexRes.error || !psbtHexRes.data) {
-        throw new Error(`buildPsbt: ${psbtHexRes.error}`);
-      }
-      data.psbtHex = psbtHexRes.data;
+      const psbtRes = buildPsbt({ rawtx: rawTx, inputs: finalInputs, network: network! });
+      data.psbt = psbtRes.data;
     }
 
     return { data };
   } catch (error: any) {
-    return { error: error.message || 'Undefined build Tx Error' };
+    return { error: error.message || 'Failed to build transaction' };
   }
 };
 
-export const buildTradeTx = async (tradeConfig: any) => {
-    try {
-        const { inputs, outputs, payload, network, isApiMode } = tradeConfig;
+/********************************************************************
+ * BUILD LTC TRADE TX
+ ********************************************************************/
+export const buildLTCTradeTx = async (txConfig: IBuildLTCITTxConfig, isApiMode: boolean) => {
+  try {
+    const { buyerKeyPair, sellerKeyPair, amount, payload, commitUTXOs, network } = txConfig;
 
-        // Prepare inputs and outputs for RPC raw transaction creation
-        const rpcInputs = inputs.map((input: any) => ({
-            txid: input.txid,
-            vout: input.vout,
-        }));
+    const buyerAddress = buyerKeyPair.address;
+    const sellerAddress = sellerKeyPair.address;
 
-        const rpcOutputs: any = {};
-        outputs.forEach((output: any) => {
-            rpcOutputs[output.address] = output.amount; // Use amount in LTC/BTC
-        });
-
-        // Create the raw transaction using the RPC
-        const crtRes = await smartRpc('createrawtransaction', [rpcInputs, rpcOutputs], isApiMode);
-        if (crtRes.error || !crtRes.data) {
-            throw new Error(`createrawtransaction: ${crtRes.error}`);
-        }
-
-        let rawTx = crtRes.data;
-
-        // Add OP_RETURN payload using bitcoinjs-lib
-        if (payload) {
-            const tx = bitcoin.Transaction.fromHex(rawTx);
-            const data = Buffer.from(payload, 'utf8');
-            const embed = bitcoin.payments.embed({ data: [data] });
-
-            const builder = bitcoin.TransactionBuilder.fromTransaction(tx, bitcoin.networks[network]);
-            builder.addOutput(embed.output!, 0); // Add OP_RETURN output
-
-            rawTx = builder.build().toHex(); // Rebuild the transaction with OP_RETURN
-        }
-
-        // Convert the raw transaction into a PSBT
-        const psbt = new bitcoin.Psbt({ network: bitcoin.networks[network] });
-
-        // Add inputs to PSBT
-        inputs.forEach((input: any) => {
-            psbt.addInput({
-                hash: input.txid,
-                index: input.vout,
-                witnessUtxo: {
-                    script: Buffer.from(input.scriptPubKey, 'hex'),
-                    value: input.amount * 1e8, // Convert to satoshis
-                },
-            });
-        });
-
-        // Add outputs to PSBT
-        const tx = bitcoin.Transaction.fromHex(rawTx);
-        tx.outs.forEach((out: any) => {
-            psbt.addOutput(out);
-        });
-
-        // Return the raw transaction and PSBT
-        return { rawtx: rawTx, psbt: psbt.toHex() };
-    } catch (error: any) {
-        return { error: error.message || 'Failed to build trade transaction' };
+    const luRes = await smartRpc('listunspent', [0, 999999999, [buyerAddress]], isApiMode);
+    if (luRes.error || !luRes.data) {
+      throw new Error(`listunspent(buyer): ${luRes.error}`);
     }
+
+    const utxos = [...commitUTXOs, ...luRes.data];
+    const inputsRes = getEnoughInputs2(utxos, amount);
+    const { finalInputs, fee } = inputsRes;
+
+    const _insForRawTx = finalInputs.map(({ txid, vout }) => ({ txid, vout }));
+    const _outsForRawTx: any = {
+      [sellerAddress]: safeNumber(amount),
+      [buyerAddress]: safeNumber(finalInputs.reduce((a, b) => a + b.amount, 0) - amount - fee),
+    };
+
+    const crtRes = await smartRpc('createrawtransaction', [_insForRawTx, _outsForRawTx], isApiMode);
+    if (crtRes.error || !crtRes.data) {
+      throw new Error(`createrawtransaction: ${crtRes.error}`);
+    }
+
+    let rawTx = crtRes.data;
+
+    if (payload) {
+      const tx = bitcoin.Transaction.fromHex(rawTx);
+      const data = Buffer.from(payload, 'utf8');
+      const embed = bitcoin.payments.embed({ data: [data] });
+
+      const txb = bitcoin.TransactionBuilder.fromTransaction(tx, networkMap[network]);
+      txb.addOutput(embed.output!, 0);
+      rawTx = txb.build().toHex();
+    }
+
+    const psbtRes = buildPsbt({ rawtx: rawTx, inputs: finalInputs, network });
+
+    return { data: { rawtx: rawTx, psbt: psbtRes.data } };
+  } catch (error: any) {
+    return { error: error.message || 'Failed to build LTC trade transaction' };
+  }
 };
-
-
 
 /********************************************************************
  * Additional Relayer Functions
- *
- * Example functions you might have for retrieving or broadcasting 
- * a transaction. Adjust to your environment as needed.
  ********************************************************************/
 
-/**
- * Retrieve a transaction from local node or an HTTP server
- */
 export const getTx = async (txid: string) => {
   try {
-    // Example of calling a local Node/Express endpoint:
     const res = await axios.post('http://localhost:3000/tl_getTransaction', { txid });
     return res.data;
   } catch (error) {
@@ -569,9 +322,6 @@ export const getTx = async (txid: string) => {
   }
 };
 
-/**
- * Broadcast the transaction on the network (via your RPC node)
- */
 export const broadcastTx = async (rawTx: string) => {
   try {
     const result = await rpcClient.call("sendrawtransaction", [rawTx]);
