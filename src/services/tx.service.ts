@@ -198,75 +198,101 @@ export const buildPsbt = (buildPsbtOptions: {
 
 /********************************************************************
  * BUILD TX
- ********************************************************************/
+ ********************************************************************/// Rewritten buildTx
 export const buildTx = async (txConfig: IBuildTxConfig, isApiMode: boolean) => {
   try {
-    const { fromKeyPair, toKeyPair, amount, payload, inputs, addPsbt, network } = txConfig;
-    const fromAddress = fromKeyPair.address;
-    const toAddress = toKeyPair.address;
+    const { fromKeyPair, toKeyPair, amount, payload, addPsbt, network } = txConfig;
 
-    // Fetch UTXOs for the fromAddress
+    const fromAddress = fromKeyPair.address;
+    const toAddress   = toKeyPair.address;
+
+    // 1) Get UTXOs from node
     const luRes = await smartRpc('listunspent', [0, 999999999, [fromAddress]], isApiMode);
     if (luRes.error || !luRes.data) {
       throw new Error(`listunspent(from): ${luRes.error}`);
     }
 
+    // 2) Sort and pick enough inputs
     const _utxos = (luRes.data as IInput[]).sort((a, b) => b.amount - a.amount);
     console.log('UTXOs:', JSON.stringify(_utxos));
 
-    // Gather enough inputs for the desired amount
     const inputsRes = getEnoughInputs2(_utxos, amount!);
     const { finalInputs, fee } = inputsRes;
-
     if (finalInputs.length === 0) {
-      throw new Error('Not enough inputs to cover the amount and fee');
+      throw new Error('Not enough inputs to cover the amount + fee');
     }
 
-    // Construct raw transaction inputs and outputs
-    const _insForRawTx = finalInputs.map(({ txid, vout }) => ({ txid, vout }));
-    const _outsForRawTx: any = { [toAddress]: safeNumber(amount! - fee) };
+    // 3) Build "inputs" and "outputs" for walletcreatefundedpsbt
+    //    Even though we have finalInputs, we pass them to the node to ensure it only uses those.
+    //    The node can still add a change output automatically if needed.
+    //    We'll specify outputs as well.
 
-    console.log('Transaction Inputs:', JSON.stringify(_insForRawTx));
-    console.log('Transaction Outputs:', JSON.stringify(_outsForRawTx));
+    // Final outputs (address => amountInBTC) 
+    // Must be in BTC if your node is set up that way. Or if your node expects satoshis, adjust accordingly.
+    const sendAmountBtc = safeNumber(amount! - fee);
+    const outputs: Record<string, number> = {
+      [toAddress]: sendAmountBtc, 
+    };
 
-    // Create raw transaction
-    const crtRes = await smartRpc('createrawtransaction', [_insForRawTx, _outsForRawTx], isApiMode);
-    if (crtRes.error || !crtRes.data) {
-      throw new Error(`createrawtransaction: ${crtRes.error}`);
-    }
-
-    let rawTx = crtRes.data;
-    console.log('Raw Transaction:', rawTx);
-
-    // Add optional payload to the transaction
+    // 4) If you have a payload (OP_RETURN), we can add a "data" output in the same outputs array.
+    //    The node interprets { data: <hexstring> } as an OP_RETURN output.
+    //    We have to supply the data in hex. Let's do that:
     if (payload) {
-      const tx = bitcoin.Transaction.fromHex(rawTx);
-      const data = Buffer.from(payload, 'utf8');
-      const embed = bitcoin.payments.embed({ data: [data] });
-
-      const psbt = new Psbt({ network: networkMap[network!] });
-      finalInputs.forEach((input) => {
-        psbt.addInput({
-          hash: input.txid,
-          index: input.vout,
-        });
-      });
-
-      tx.outs.forEach((output) => psbt.addOutput(output));
-      psbt.addOutput({
-        script: embed.output!,
-        value: 0, // OP_RETURN outputs do not hold value
-      });
-
-      rawTx = psbt.toHex(); // Return the PSBT as a hex string
+      const dataHex = Buffer.from(payload, 'utf8').toString('hex');
+      // If we want to add OP_RETURN in addition to sending to `toAddress`, we can do:
+      outputs.data = dataHex; 
+      // Or if we only want an OP_RETURN and no normal payment, remove the line above for `[toAddress]`.
     }
 
-    // Prepare the response
-    const data: any = { rawtx: rawTx, inputs: finalInputs };
+    // 5) Convert finalInputs into the format "walletcreatefundedpsbt" expects:
+    //    An array of { "txid": string, "vout": number, "sequence"?: number }
+    const psbtInputs = finalInputs.map(inp => ({
+      txid: inp.txid,
+      vout: inp.vout,
+    }));
 
+    // 6) Call walletcreatefundedpsbt
+    //    The 3rd param is locktime (0 = none). 
+    //    The 4th param is options. 
+    //    The 5th param is bip32derivs (usually true if you want BIP32 derivation info).
+    const wcfpRes = await smartRpc(
+      'walletcreatefundedpsbt', 
+      [ psbtInputs, outputs, 0, { 
+          // If you want to specify a custom change address:
+          // "changeAddress": fromAddress,
+          // "includeWatching": true,
+          // "feeRate": 0.00001000,  // example fee rate in BTC/kvB
+        }, 
+        true 
+      ], 
+      isApiMode
+    );
+
+    if (wcfpRes.error || !wcfpRes.data) {
+      throw new Error(`walletcreatefundedpsbt: ${wcfpRes.error || 'no data'}`);
+    }
+
+    // The result typically includes { psbt: "base64string", fee: X, changePos: Y }
+    const { psbt: psbtBase64, fee: actualFee, changePos } = wcfpRes.data;
+
+    // 7) Optionally finalize with buildPsbt? Or just return the base64 from the node.
+    //    If you want to modify the PSBT further in Node.js, you can do:
+    // const psbtObj = Psbt.fromBase64(psbtBase64, { network: networkMap[network!] });
+    // psbtObj.addSomething()...   // But usually it's fully formed for signing.
+
+    // 8) Prepare the response
+    const data: any = {
+      // rawtx is not needed if you're doing PSBT flow, but let's keep consistency:
+      rawtx: psbtBase64,  // This is actually a PSBT base64
+      inputs: finalInputs,
+    };
+
+    // If the user wants a separate PSBT output (maybe in hex?), we can do:
     if (addPsbt) {
-      const psbtRes = buildPsbt({ rawtx: rawTx, inputs: finalInputs, network: network! });
-      data.psbt = psbtRes.data;
+      // They might want it as hex. Convert from base64 to hex:
+      const psbtBuf = Buffer.from(psbtBase64, 'base64');
+      const psbtHex = psbtBuf.toString('hex');
+      data.psbt = psbtHex;
     }
 
     return { data };
@@ -275,7 +301,6 @@ export const buildTx = async (txConfig: IBuildTxConfig, isApiMode: boolean) => {
     return { error: error.message || 'Failed to build transaction' };
   }
 };
-
 
 /********************************************************************
  * BUILD LTC TRADE TX
