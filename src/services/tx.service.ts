@@ -204,51 +204,65 @@ export const buildTx = async (txConfig: IBuildTxConfig, isApiMode: boolean) => {
     const fromAddress = fromKeyPair.address;
     const toAddress = toKeyPair.address;
 
+    // Fetch UTXOs for the fromAddress
     const luRes = await smartRpc('listunspent', [0, 999999999, [fromAddress]], isApiMode);
     if (luRes.error || !luRes.data) {
       throw new Error(`listunspent(from): ${luRes.error}`);
     }
 
     const _utxos = (luRes.data as IInput[]).sort((a, b) => b.amount - a.amount);
+    console.log('UTXOs:', JSON.stringify(_utxos));
+
+    // Gather enough inputs for the desired amount
     const inputsRes = getEnoughInputs2(_utxos, amount!);
     const { finalInputs, fee } = inputsRes;
 
-    if (finalInputs.length === 0) throw new Error('Not enough inputs');
+    if (finalInputs.length === 0) {
+      throw new Error('Not enough inputs to cover the amount and fee');
+    }
+
+    // Construct raw transaction inputs and outputs
     const _insForRawTx = finalInputs.map(({ txid, vout }) => ({ txid, vout }));
     const _outsForRawTx: any = { [toAddress]: safeNumber(amount! - fee) };
 
+    console.log('Transaction Inputs:', JSON.stringify(_insForRawTx));
+    console.log('Transaction Outputs:', JSON.stringify(_outsForRawTx));
+
+    // Create raw transaction
     const crtRes = await smartRpc('createrawtransaction', [_insForRawTx, _outsForRawTx], isApiMode);
     if (crtRes.error || !crtRes.data) {
       throw new Error(`createrawtransaction: ${crtRes.error}`);
     }
 
     let rawTx = crtRes.data;
+    console.log('Raw Transaction:', rawTx);
 
+    // Add optional payload to the transaction
     if (payload) {
       const tx = bitcoin.Transaction.fromHex(rawTx);
       const data = Buffer.from(payload, 'utf8');
       const embed = bitcoin.payments.embed({ data: [data] });
 
       const psbt = new Psbt({ network: networkMap[network!] });
-      finalInputs.forEach((input, index) => {
+      finalInputs.forEach((input) => {
         psbt.addInput({
           hash: input.txid,
           index: input.vout,
-          witnessUtxo: {
-            script: Buffer.from(input.scriptPubKey, 'hex'),
-            value: input.amount * 1e8, // Convert to satoshis
-          },
         });
       });
+
+      tx.outs.forEach((output) => psbt.addOutput(output));
       psbt.addOutput({
         script: embed.output!,
-        value: 0,
+        value: 0, // OP_RETURN outputs do not hold value
       });
 
-      rawTx = psbt.finalizeAllInputs().extractTransaction().toHex();
+      rawTx = psbt.toHex(); // Return the PSBT as a hex string
     }
 
+    // Prepare the response
     const data: any = { rawtx: rawTx, inputs: finalInputs };
+
     if (addPsbt) {
       const psbtRes = buildPsbt({ rawtx: rawTx, inputs: finalInputs, network: network! });
       data.psbt = psbtRes.data;
@@ -256,9 +270,11 @@ export const buildTx = async (txConfig: IBuildTxConfig, isApiMode: boolean) => {
 
     return { data };
   } catch (error: any) {
+    console.error('Error in buildTx:', error.message || error);
     return { error: error.message || 'Failed to build transaction' };
   }
 };
+
 
 /********************************************************************
  * BUILD LTC TRADE TX
