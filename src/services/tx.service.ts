@@ -230,19 +230,17 @@ export const buildTx = async (txConfig: IBuildTxConfig, isApiMode: boolean) => {
     // Final outputs (address => amountInBTC) 
     // Must be in BTC if your node is set up that way. Or if your node expects satoshis, adjust accordingly.
     const sendAmountBtc = safeNumber(amount! - fee);
-    const outputs: Record<string, number> = {
+    const outputs: Record<string, number| string> = {
       [toAddress]: sendAmountBtc, 
     };
 
     // 4) If you have a payload (OP_RETURN), we can add a "data" output in the same outputs array.
     //    The node interprets { data: <hexstring> } as an OP_RETURN output.
     //    We have to supply the data in hex. Let's do that:
-    if (payload) {
-      const dataHex = Buffer.from(payload, 'utf8').toString('hex');
-      // If we want to add OP_RETURN in addition to sending to `toAddress`, we can do:
-      outputs.data = dataHex; 
-      // Or if we only want an OP_RETURN and no normal payment, remove the line above for `[toAddress]`.
-    }
+   if (payload) {
+  const dataHex = Buffer.from(payload, 'utf8').toString('hex');
+  outputs.data = dataHex;  // now valid, because 'data' can be a string
+}
 
     // 5) Convert finalInputs into the format "walletcreatefundedpsbt" expects:
     //    An array of { "txid": string, "vout": number, "sequence"?: number }
