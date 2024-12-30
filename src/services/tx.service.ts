@@ -79,7 +79,8 @@ export interface ApiRes {
   error?: string;
 }
 
-export type TClient = (method: string, ...args: any[]) => Promise<ApiRes>;
+export type TClient = (method: string, ...args: any[]) => Promise<any>;
+
 
 /********************************************************************
  * Example: Smart RPC calls and local "TL" calls
