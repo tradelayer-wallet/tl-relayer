@@ -118,7 +118,7 @@ export const smartRpc: TClient = async (
  * Example: local Express/Node service for Omni/LTC/BTC calls, if any
  */
 export const jsTlApi: TClient = async (method: string, params: any[] = []) => {
-  const url = `http://localhost:3000/${method}`;
+  const url = `http://localhost:3001/${method}`;
   return axios.post(url, { params }).then((res) => res.data);
 };
 
