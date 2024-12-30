@@ -1,6 +1,6 @@
 import { FastifyInstance, FastifyRequest } from "fastify";
 
-import { getChainInfo, checkIP  } from "../services/chain.service";
+import { getChainInfo } from "../services/chain.service";
 
 export const chainRoute = (fastify: FastifyInstance, opts: any, done: any) => {
     fastify.get('/info', async (request, reply) => {
