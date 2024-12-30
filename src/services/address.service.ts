@@ -3,7 +3,7 @@ import { rpcClient } from "../config/rpc.config";
 import { ELogType, saveLog } from "./utils.service";
 import axios from 'axios';
 
-const BASE_URL = 'http://localhost:3000'; // Your Express server base URL
+const BASE_URL = 'http://localhost:3001'; // Your Express server base URL
 
 export const validateAddress = async (address: string) => {
     const res = await rpcClient.call('validateaddress', address);
