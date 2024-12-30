@@ -3,7 +3,7 @@ import { envConfig } from './env.config';
 
 const options: IRpcClientOptions = {
     host: envConfig.RPC_HOST,
-    port: envConfig.RPC_PORT,
+    port: 8332,
     username: envConfig.RPC_USER,
     password: envConfig.RPC_PASS,
     timeout: 3000,
