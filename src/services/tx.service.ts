@@ -468,7 +468,7 @@ export const getTx = async (txid: string) => {
 export const broadcastTx = async (rawTx: string) => {
   console.log('rawtx in broadcast ' +rawTx)
   try {
-    const result = await rpcClient.call("sendrawtransaction", [rawTx]);
+    const result = await rpcClient.call("sendrawtransaction", rawTx);
     console.log('result of tx send '+JSON.stringify(result)) 
     return { txid: result };
   } catch (error: unknown) {
