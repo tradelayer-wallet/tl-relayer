@@ -82,7 +82,7 @@ export const rpcRoutes = (fastify: FastifyInstance, opts: any, done: any) => {
             // Forward "tl_" prefixed methods to localhost:3000
             if (method.startsWith("tl_")) {
                 try {
-                    const response = await axios.post(`http://localhost:3000/${method}`, { params });
+                    const response = await axios.post(`http://localhost:3001/${method}`, { params });
                     reply.send(response.data);
                     return;
                 } catch (axiosError: unknown) {
