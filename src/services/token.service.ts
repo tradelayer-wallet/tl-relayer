@@ -2,7 +2,7 @@ import { rpcClient } from "../config/rpc.config"
 
 import axios from 'axios';
 
-const BASE_URL = 'http://localhost:3000'; // Your Express server base URL
+const BASE_URL = 'http://localhost:3001'; // Your Express server base URL
 
 
 export const getTokenInfo = async (propid: number | string) => {
