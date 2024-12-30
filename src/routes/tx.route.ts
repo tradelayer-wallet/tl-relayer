@@ -24,7 +24,7 @@ export const txRoute = (fastify: FastifyInstance, opts: any, done: any) => {
 
     // Broadcast transaction
     fastify.post('/sendTx', async (request: FastifyRequest<{ Body: { rawTx: string } }>, reply) => {
-        console.log('in sendTx route ' +request.body)
+        console.log('in sendTx route ' +JSON.stringify(request.body))
         try {
             const { rawTx } = request.body;
             const result = await broadcastTx(rawTx);
