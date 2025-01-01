@@ -12,4 +12,5 @@ export const chainRoute = (fastify: FastifyInstance, opts: any, done: any) => {
             reply.status(500).send({ error: errorMessage });
         }
     });
+}
 
