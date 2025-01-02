@@ -20,12 +20,14 @@ export const listunspent = async (
 
         console.log('params in listunspent ' + address + ' ' + pubkey);
 
+                const walletPath = "/wallet/tl-relay";
         // Validate the address
-        const addressInfo = await rpcClient.call("getaddressinfo", address);
+        const addressInfo = await rpcClient.call(`${walletPath}/getaddressinfo`, address);
         console.log(JSON.stringify(addressInfo));
 
-        if (!addressInfo.data.ismine) {
+        if (!addressInfo || !addressInfo.data || !addressInfo.data.ismine) {
             console.log('Address not recognized as owned. ' + JSON.stringify(addressInfo));
+
             
             // Check if the pubkey needs to be imported
             if (pubkey) {
@@ -40,7 +42,7 @@ export const listunspent = async (
         }
 
         // Attempt to fetch unspent UTXOs using the RPC client
-        const luRes = await rpcClient.call("listunspent", minBlock, maxBlock, [address]);
+        const luRes = await rpcClient.call(`${walletPath}/listunspent`, minBlock, maxBlock, [address]);
         if (luRes.error || !luRes.data) {
             throw new Error(`listunspent RPC error: ${luRes.error}`);
         }
