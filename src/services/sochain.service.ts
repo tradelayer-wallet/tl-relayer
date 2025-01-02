@@ -22,7 +22,7 @@ export const listunspent = async (
 
                 const label = "tl-relay";
         // Validate the address
-        const addressInfo = await rpcClient.call(`getaddressinfo`, address, label);
+        const addressInfo = await rpcClient.call(`getaddressinfo`, address);
         console.log(JSON.stringify(addressInfo));
 
         if (!addressInfo || !addressInfo.data || !addressInfo.data.ismine) {
