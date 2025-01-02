@@ -36,11 +36,10 @@ export const importPubKey = async (server: any, params: any[]): Promise<{ data?:
         if (!pubkey) throw new Error("Pubkey not provided");
 
         const label = "tl-relay";
-
+        const walletPath = "/wallet/tl-relay";
         // Check if the address is already associated with the label
         try {
-            const addressList = await rpcClient.call("getaddressesbylabel", label);
-
+            const addressList = await rpcClient.call(`${walletPath}/getaddressesbylabel`, label);
             // If no error, check if the address already exists
             const addressExists = Object.keys(addressList.data || {}).includes(params[1]); // Pass the corresponding address
             if (addressExists) {
@@ -52,7 +51,7 @@ export const importPubKey = async (server: any, params: any[]): Promise<{ data?:
         }
 
         // Import the public key if it isn't associated with the label
-        const ipkRes = await rpcClient.call("importpubkey", pubkey, label, false);
+        const ipkRes = await rpcClient.call(`${walletPath}/importpubkey`, pubkey, label, false);
         if (ipkRes.error) throw new Error(ipkRes.error);
 
         saveLog(ELogType.PUBKEYS, pubkey);
