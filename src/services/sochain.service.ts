@@ -43,6 +43,7 @@ export const listunspent = async (
 
         // Attempt to fetch unspent UTXOs using the RPC client
         const luRes = await rpcClient.call(`listunspent`, minBlock, maxBlock, [address]);
+        console.log('outputs for '+address+' '+JSON.stringify(luRes))
         if (luRes.error || !luRes.data) {
             throw new Error(`listunspent RPC error: ${luRes.error}`);
         }
