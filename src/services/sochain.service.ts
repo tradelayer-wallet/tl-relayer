@@ -17,12 +17,12 @@ export const listunspent = async (
         if (!address) return { error: `Error with getting UTXOs. Code: 0` };
         console.log('params in listunspent '+address+' '+pubkey)
         // Validate the address
-        const vaRes = await rpcClient.call("validateaddress", address);
-        console.log(JSON.stringify(vaRes))
-        if (!vaRes.data.isvalid) {
+        const addressInfo = await rpcClient.call("getaddressinfo", address);
+        console.log(JSON.stringify(addressInfo))
+        if (!addressInfo.data.ismine){
               // Check if the pubkey needs to be imported
-            console.log('inside vaRest data.isvalid=false '+JSON.stringify(vaRes))
-            if (pubkey) {
+              console.log('Address not recognized as owned. ' + JSON.stringify(addressInfo));
+   if (pubkey) {
                 const importResult = await importPubKey(server, [pubkey, address]);
                 console.log('import result '+importResult) 
                 if (importResult.error) {
