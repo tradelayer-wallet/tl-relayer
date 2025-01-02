@@ -1,5 +1,4 @@
 import { FastifyInstance, FastifyRequest } from "fastify";
-
 import { getChainInfo } from "../services/chain.service";
 
 export const chainRoute = (fastify: FastifyInstance, opts: any, done: any) => {
@@ -12,5 +11,7 @@ export const chainRoute = (fastify: FastifyInstance, opts: any, done: any) => {
             reply.status(500).send({ error: errorMessage });
         }
     });
-}
 
+    // Notify Fastify that the plugin setup is complete
+    done();
+};
