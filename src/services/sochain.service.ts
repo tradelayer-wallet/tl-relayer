@@ -70,51 +70,6 @@ export const listunspent = async (
 
         return { data };
     } catch (nodeError: unknown) {
-        const errorMessage =
-            nodeError instanceof Error ? nodeError.message : "An unexpected error occurred";
-
-        console.warn("Node UTXO fetch failed, falling back to BlockCypher:", errorMessage);
-
-        // Fallback to BlockCypher API
-        try {
-            const url = `${baseURL}ltc/${envConfig.NETWORK}/addrs/${params[2].address}/balance?token=${token}`;
-            const response = await server.axios.get(url);
-
-            const { data, error } = response;
-            if (error || !data) {
-                return { error: error || `Error with getting ${params[2].address} UTXOs. Code: 1` };
-            } else if (!data.txrefs) {
-                return { error: `Error: No transaction references (UTXOs) for address ${params[2].address}.` };
-            }
-
-            const utxos = data.txrefs
-                .filter(
-                    ({ confirmations }: { confirmations: number }) =>
-                        confirmations >= params[0] && confirmations <= params[1]
-                )
-                .map(
-                    (u: {
-                        tx_hash: string;
-                        value: number;
-                        confirmations: number;
-                        script: string;
-                        tx_output_n: number;
-                    }) => ({
-                        txid: u.tx_hash,
-                        amount: u.value / 1e8, // Convert satoshis to LTC
-                        confirmations: u.confirmations,
-                        scriptPubKey: u.script,
-                        vout: u.tx_output_n,
-                    })
-                );
-
-            return { data: utxos };
-        } catch (blockCypherError: unknown) {
-            const errorMessage =
-                blockCypherError instanceof Error
-                    ? blockCypherError.message
-                    : "An unexpected error occurred during BlockCypher fallback.";
             return { error: errorMessage };
-        }
     }
 };
