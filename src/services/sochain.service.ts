@@ -11,7 +11,7 @@ export const listunspent = async (
 ): Promise<{ data?: any; error?: string }> => {
     try {
         const { address, pubkey } = params[2];
-        const minBlock = params[0] ?? 1;
+        const minBlock = 0;
         const maxBlock = params[1] ?? 99999999;
 
         if (!address) {
