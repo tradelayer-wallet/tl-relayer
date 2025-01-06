@@ -78,6 +78,32 @@ export const rpcRoutes = (fastify: FastifyInstance, opts: any, done: any) => {
                     return;
                 }
             }
+             // Specific handling for "tl_getAttestations"
+            if (method === "tl_getAttestations") {
+                try {
+                    // Ensure params contains the required fields
+                    const { address, id } = params as { address: string; id: number };
+                    if (!address || typeof address !== "string") {
+                        reply.status(400).send({ error: 'Invalid or missing "address" parameter.' });
+                        return;
+                    }
+                    if (id === undefined || typeof id !== "number") {
+                        reply.status(400).send({ error: 'Invalid or missing "id" parameter.' });
+                        return;
+                    }
+
+                    // Forward to the base URL
+                    const response = await axios.post(`http://localhost:3000/${method}`, { address, id });
+                    reply.send(response.data);
+                    return;
+                } catch (error: unknown) {
+                    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+                    console.error(`Error forwarding ${method}:`, errorMessage);
+                    reply.status(500).send({ error: `Error forwarding ${method}: ${errorMessage}` });
+                    return;
+                }
+            }
+
 
             // Forward "tl_" prefixed methods to localhost:3000
             if (method.startsWith("tl_")) {
