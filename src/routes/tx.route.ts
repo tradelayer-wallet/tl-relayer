@@ -22,6 +22,17 @@ export const txRoute = (fastify: FastifyInstance, opts: any, done: any) => {
         }
     });
 
+    fastify.post('/decode', async (request: FastifyRequest<{ Params: { rawtx: string } }>, reply) => {
+        try {
+            const { rawtx } = request.params;
+            const res = await decodeTx(txid);
+            reply.send(res);
+        } catch (error: unknown) {
+            const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+            reply.status(500).send({ error: errorMessage });
+        }
+    });
+
     // Broadcast transaction
     fastify.post('/sendTx', async (request: FastifyRequest<{ Body: { rawTx: string } }>, reply) => {
         console.log('in sendTx route ' +JSON.stringify(request.body))
