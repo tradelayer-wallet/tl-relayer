@@ -26,7 +26,7 @@ export const txRoute = (fastify: FastifyInstance, opts: any, done: any) => {
     fastify.post('/decode', async (request: FastifyRequest<{ Params: { rawtx: string } }>, reply) => {
         try {
             const { rawtx } = request.params;
-            const res = await decodeTx(txid);
+            const res = await decodeTx(rawtx);
             reply.send(res);
         } catch (error: unknown) {
             const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
