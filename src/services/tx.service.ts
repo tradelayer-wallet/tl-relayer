@@ -200,7 +200,7 @@ export const buildPsbt = (buildPsbtOptions: {
 export const decodeTx = async (rawTx: string) => {
   try {
     // 1) Get UTXOs from node
-    const luRes = await smartRpc('decoderawtransction', rawTx);
+    const luRes = await smartRpc('decoderawtransaction', rawTx);
     if (luRes.error || !luRes.data) {
       throw new Error(`listunspent(from): ${luRes.error}`);
     }
