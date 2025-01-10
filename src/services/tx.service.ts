@@ -206,7 +206,8 @@ export const decodeTx = async (rawTx: string) => {
     }
     return luRes
   }catch(error:any){
-    return error
+   console.error('Error in decodeTx:', error.message || error);
+    throw error; // Re-throw to be handled by the caller
   }
 }
 
