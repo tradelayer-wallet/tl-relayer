@@ -23,9 +23,9 @@ export const txRoute = (fastify: FastifyInstance, opts: any, done: any) => {
         }
     });
 
-    fastify.post('/decode', async (request: FastifyRequest<{ Params: { rawtx: string } }>, reply) => {
+    fastify.post('/decode', async (request: FastifyRequest<{ Body: { rawtx: string } }>, reply) => {
         try {
-            const { rawtx } = request.params;
+            const { rawtx } = request.body; // Correct to use `body` here
             const res = await decodeTx(rawtx);
             reply.send(res);
         } catch (error: unknown) {
@@ -33,6 +33,7 @@ export const txRoute = (fastify: FastifyInstance, opts: any, done: any) => {
             reply.status(500).send({ error: errorMessage });
         }
     });
+
 
     // Broadcast transaction
     fastify.post('/sendTx', async (request: FastifyRequest<{ Body: { rawTx: string } }>, reply) => {
