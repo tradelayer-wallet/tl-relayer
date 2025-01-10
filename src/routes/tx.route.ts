@@ -2,6 +2,7 @@ import { FastifyInstance, FastifyRequest } from "fastify";
 import {
     getTx,
     broadcastTx,
+    decodeTx,
     buildTx,
     buildTradeTx,
     buildLTCTradeTx,
