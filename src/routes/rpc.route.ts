@@ -10,6 +10,7 @@ export const rpcRoutes = (fastify: FastifyInstance, opts: any, done: any) => {
     // Define routes explicitly
     fastify.post('/payload', handlePayload);
     fastify.post('/tl_getAttestations', handleGetAttestations);
+    fastify.post('tl_getChannelColumn', handleGetChannelColumn)
     fastify.post('/:method', handleGenericRpc);
 
     done();
@@ -60,6 +61,30 @@ async function handleGetAttestations(request: any, reply: any) {
 
         // Forward to the localhost service
         const response = await axios.post(`http://localhost:3000/tl_getAttestations`, { address, id });
+        reply.send(response.data);
+    } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        console.error(`Error in tl_getAttestations:`, errorMessage);
+        reply.status(500).send({ error: `Error forwarding tl_getAttestations: ${errorMessage}` });
+    }
+}
+
+
+async function handleGetChannelColumn(request: any, reply: any) {
+    try {
+        const { myAddr, cpAddr } = request.body as { myAddr: string; cpAddr: string };
+
+        if (!myAddr || typeof myAddr !== "string") {
+            reply.status(400).send({ error: 'Invalid or missing "address" parameter.' });
+            return;
+        }
+        if (cpAddr === undefined || typeof cpAddr!== "number") {
+            reply.status(400).send({ error: 'Invalid or missing "id" parameter.' });
+            return;
+        }
+
+        // Forward to the localhost service
+        const response = await axios.post(`http://localhost:3000/tl_getChannelColumn`, { myAddr, cpAddr });
         reply.send(response.data);
     } catch (error: unknown) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
