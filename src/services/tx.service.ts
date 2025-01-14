@@ -178,7 +178,7 @@ export const buildPsbt = (buildPsbtOptions: {
     const _network = networks[network];  // e.g. LTC, BTC, etc.
 
     const tx = Transaction.fromHex(rawtx);
-
+    console.log('tx outputs ' +JSON.stringify(tx.outs))
     const psbt = new Psbt({ network: _network });
 
     inputs.forEach((input: IUTXO) => {
