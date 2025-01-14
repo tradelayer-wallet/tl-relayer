@@ -76,17 +76,22 @@ export const txRoute = (fastify: FastifyInstance, opts: any, done: any) => {
     });
 
     // Build LTC trade transaction
-    fastify.post('/buildLTCTradeTx', async (request: FastifyRequest<{ Body: IBuildLTCITTxConfig }>, reply) => {
-        console.log('Incoming Request Body:', JSON.stringify(request.body, null, 2));
-        try {
-            const ltcTradeConfig = request.body;
-            const result = await buildLTCTradeTx(ltcTradeConfig, false);
-            reply.send(result);
-        } catch (error: unknown) {
-            const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
-            reply.status(500).send({ error: errorMessage });
-        }
-    });
+    fastify.post('/buildLTCTradeTx', async (request: FastifyRequest<{ Body: { buildLTCITTxConfig: IBuildLTCITTxConfig } }>, reply) => {
+  try {
+    const { buildLTCITTxConfig } = request.body;
+
+    // Validate required fields
+    if (!buildLTCITTxConfig || !buildLTCITTxConfig.buyerKeyPair || !buildLTCITTxConfig.sellerKeyPair) {
+      throw new Error('Invalid payload: Missing buyerKeyPair or sellerKeyPair');
+    }
+
+    const result = await buildLTCTradeTx(buildLTCITTxConfig, false);
+    reply.send(result);
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+    reply.status(500).send({ error: errorMessage });
+  }
+});
 
     done();
 };
