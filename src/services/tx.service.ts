@@ -369,7 +369,7 @@ export const buildTx = async (txConfig: IBuildTxConfig, isApiMode: boolean) => {
       const tx = bitcoin.Transaction.fromHex(rawTx);
       const data = Buffer.from(payload, 'utf8');
       const embed = bitcoin.payments.embed({ data: [data] });
-
+      let psbtHex = ''
       const psbt = new Psbt({ network: networkMap[network] });
       finalInputs.forEach((input) => {
         psbt.addInput({
@@ -384,11 +384,11 @@ export const buildTx = async (txConfig: IBuildTxConfig, isApiMode: boolean) => {
         value: 0,
       });
 
-      rawTx = psbt.toHex();
+      psbtHex = psbt.toHex();
     }
 
     return {
-      data: { rawtx: rawTx, inputs: finalInputs, fee },
+      data: { rawtx: rawTx, inputs: finalInputs, psbtHex: psbtHex  },
     };
   } catch (error: any) {
     console.error('Error in buildLTCTradeTx:', error.message || error);
