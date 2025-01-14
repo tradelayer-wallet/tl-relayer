@@ -326,10 +326,9 @@ export const buildTx = async (txConfig: IBuildTxConfig, isApiMode: boolean) => {
 
 /********************************************************************
  * BUILD LTC TRADE TX
- ********************************************************************/
-/********************************************************************
- * BUILD LTC TRADE TX
- ********************************************************************/export const buildLTCTradeTx = async (txConfig: IBuildLTCITTxConfig, isApiMode: boolean) => {
+*/
+
+export const buildLTCTradeTx = async (txConfig: IBuildLTCITTxConfig, isApiMode: boolean) => {
   try {
     console.log('tx config in built ltc trade ' + JSON.stringify(txConfig));
     const { buyerKeyPair, sellerKeyPair, amount, payload, commitUTXOs, network } = txConfig;
@@ -382,21 +381,28 @@ export const buildTx = async (txConfig: IBuildTxConfig, isApiMode: boolean) => {
 
       const psbt = new Psbt({ network: networkMap[network] });
 
-      finalInputs.forEach((input) => {
+      finalInputs.forEach((input: IUTXO) => {
         const psbtInput: any = {
           hash: input.txid,
           index: input.vout,
         };
 
-        if (input.scriptPubKey && input.amount) {
-          psbtInput.witnessUtxo = {
-            script: Buffer.from(input.scriptPubKey, 'hex'),
-            value: Math.round(input.amount * 1e8), // Convert LTC to satoshis
-          };
-        }
+        // Use scripts from commitUTXOs if available
+        const matchingUTXO = commitUTXOs.find(
+          (utxo) => utxo.txid === input.txid && utxo.vout === input.vout
+        );
 
-        if (input.redeemScript) {
-          psbtInput.redeemScript = Buffer.from(input.redeemScript, 'hex');
+        if (matchingUTXO) {
+          psbtInput.witnessUtxo = {
+            script: Buffer.from(matchingUTXO.scriptPubKey, 'hex'),
+            value: Math.round(matchingUTXO.amount * 1e8),
+          };
+
+          if (matchingUTXO.redeemScript) {
+            psbtInput.redeemScript = Buffer.from(matchingUTXO.redeemScript, 'hex');
+          }
+        } else {
+          throw new Error(`Missing script information for input: ${input.txid}:${input.vout}`);
         }
 
         psbt.addInput(psbtInput);
