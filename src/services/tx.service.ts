@@ -136,9 +136,12 @@ export const safeNumber = (value: number, decimals = 8): number => {
 /**
  * Gathers enough UTXOs for a target amount. A simplistic approach:
  */
-const getEnoughInputs2 = (utxos, amount) => {
+const getEnoughInputs2 = (
+  utxos: Array<{ txid: string; vout: number; amount: number }>,
+  amount: number
+): { finalInputs: Array<{ txid: string; vout: number; amount: number }>; fee: number } => {
   const sortedUtxos = [...utxos].sort((a, b) => b.amount - a.amount); // Sort by amount (largest first)
-  const finalInputs = [];
+  const finalInputs: Array<{ txid: string; vout: number; amount: number }> = [];
   let total = 0;
 
   for (const utxo of sortedUtxos) {
@@ -148,13 +151,12 @@ const getEnoughInputs2 = (utxos, amount) => {
   }
 
   if (total < amount) {
-    throw new Error("Not enough UTXOs to cover the required amount");
+    throw new Error('Not enough UTXOs to cover the required amount');
   }
 
   const fee = 0.00001; // Example static fee, adjust dynamically if needed
   return { finalInputs, fee };
 };
-
 
 /********************************************************************
  * BUILD PSBT
