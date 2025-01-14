@@ -419,7 +419,7 @@ export const buildLTCTradeTx = async (txConfig: IBuildLTCITTxConfig, isApiMode: 
         throw new Error(psbtBuildResult.error);
       }
 
-      psbtHex = psbtBuildResult.data?;
+     psbtHex = psbtBuildResult.data ?? '';
     }
 
     return {
