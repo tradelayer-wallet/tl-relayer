@@ -320,7 +320,8 @@ export const buildTx = async (txConfig: IBuildTxConfig, isApiMode: boolean) => {
  ********************************************************************/
 /********************************************************************
  * BUILD LTC TRADE TX
- ********************************************************************/export const buildLTCTradeTx = async (txConfig: IBuildLTCITTxConfig, isApiMode: boolean) => {
+ ********************************************************************/
+export const buildLTCTradeTx = async (txConfig: IBuildLTCITTxConfig, isApiMode: boolean) => {
   try {
     console.log('tx config in built ltc trade ' + JSON.stringify(txConfig));
     const { buyerKeyPair, sellerKeyPair, amount, payload, commitUTXOs, network } = txConfig;
@@ -419,6 +420,7 @@ export const buildTx = async (txConfig: IBuildTxConfig, isApiMode: boolean) => {
     return { error: error.message || 'Failed to build LTC trade transaction' };
   }
 };
+
 
 
 export const buildTradeTx = async (tradeConfig: IBuildLTCITTxConfig) => {
