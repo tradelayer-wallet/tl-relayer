@@ -392,22 +392,28 @@ export const buildLTCTradeTx = async (txConfig: IBuildLTCITTxConfig, isApiMode: 
         };
 
         // Use scripts from `commitUTXOs` or normal UTXOs
-        const matchingUTXO = commitUTXOs.find(
-          (utxo) => utxo.txid === input.txid && utxo.vout === input.vout
-        ) || luRes.data.find((utxo) => utxo.txid === input.txid && utxo.vout === input.vout);
+       // Exclude `commitUTXOs` from normal selection
+const normalUTXOs = luRes.data.filter(
+  (utxo: IUTXO) => !commitUTXOs.some((cUtxo: IUTXO) => cUtxo.txid === utxo.txid && cUtxo.vout === utxo.vout)
+);
 
-        if (matchingUTXO) {
-          psbtInput.witnessUtxo = {
-            script: Buffer.from(matchingUTXO.scriptPubKey, 'hex'),
-            value: Math.round(matchingUTXO.amount * 1e8),
-          };
+// Use scripts from `commitUTXOs` or normal UTXOs
+const matchingUTXO = commitUTXOs.find(
+  (utxo: IUTXO) => utxo.txid === input.txid && utxo.vout === input.vout
+) || luRes.data.find((utxo: IUTXO) => utxo.txid === input.txid && utxo.vout === input.vout);
 
-          if (matchingUTXO.redeemScript) {
-            psbtInput.redeemScript = Buffer.from(matchingUTXO.redeemScript, 'hex');
-          }
-        } else {
-          throw new Error(`Missing script information for input: ${input.txid}:${input.vout}`);
-        }
+if (matchingUTXO) {
+  psbtInput.witnessUtxo = {
+    script: Buffer.from(matchingUTXO.scriptPubKey, 'hex'),
+    value: Math.round(matchingUTXO.amount * 1e8),
+  };
+
+  if (matchingUTXO.redeemScript) {
+    psbtInput.redeemScript = Buffer.from(matchingUTXO.redeemScript, 'hex');
+  }
+} else {
+  throw new Error(`Missing script information for input: ${input.txid}:${input.vout}`);
+}
 
         psbt.addInput(psbtInput);
       });
