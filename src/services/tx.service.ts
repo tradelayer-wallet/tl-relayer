@@ -336,7 +336,7 @@ export const buildLTCTradeTx = async (txConfig: IBuildLTCITTxConfig, isApiMode: 
     const { buyerKeyPair, sellerKeyPair, amount, payload, commitUTXOs, network } = txConfig;
 
     const buyerAddress = buyerKeyPair.address;
-    const sellerAddress = buyerKeyPair.address;
+    const sellerAddress = sellerKeyPair.address;
 
     console.log(`Buyer: ${buyerAddress}, Seller: ${sellerAddress}, Amount: ${amount}`);
 
