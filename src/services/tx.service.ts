@@ -197,7 +197,13 @@ export const buildPsbt = (buildPsbtOptions: {
       psbt.addInput(inputObj);
     });
 
-    psbt.addOutputs(tx.outs);
+    tx.outs.forEach((output) => {
+      psbt.addOutput({
+        script: output.script, // Already a Buffer
+        value: BigInt(output.value), // Ensure value is a BigInt
+      });
+    });
+
 
     const psbtHex = psbt.toHex();
     
