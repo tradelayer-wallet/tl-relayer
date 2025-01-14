@@ -53,7 +53,7 @@ export interface IBuildTxConfig {
   };
   amount?: number;
   payload?: string;
-  inputs?: IInput[];
+  inputs?: IUTXO[];
   addPsbt?: boolean;
   network?: string;
 };
@@ -69,8 +69,8 @@ export interface IBuildLTCITTxConfig {
   };
   amount: number;
   payload: string;
-  commitUTXOs: IInput[],
-  inputs: IInput[]
+  commitUTXOs: IUTXO[],
+  inputs: IUTXO[]
   network: string;
 }
 
