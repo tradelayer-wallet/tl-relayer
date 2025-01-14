@@ -383,7 +383,8 @@ export const buildTx = async (txConfig: IBuildTxConfig, isApiMode: boolean) => {
         script: embed.output!,
         value: 0,
       });
-
+ 
+console.log('PSBT Details:', JSON.stringify(psbt.toJSON(), null, 2));
       psbtHex = psbt.toHex();
     }
 
