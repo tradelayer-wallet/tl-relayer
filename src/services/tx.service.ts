@@ -136,18 +136,25 @@ export const safeNumber = (value: number, decimals = 8): number => {
 /**
  * Gathers enough UTXOs for a target amount. A simplistic approach:
  */
-const getEnoughInputs2 = (_inputs: IUTXO[], amount: number) => {
-  const finalInputs: IUTXO[] = [];
-  _inputs.forEach((u) => {
-    const currentSum = finalInputs.reduce((a, b) => a + b.amount, 0);
-    const needed = safeNumber(amount + ((0.2 * minFeeLtcPerKb) * (finalInputs.length + 1)));
-    if (currentSum < needed) {
-      finalInputs.push(u);
-    }
-  });
-  const fee = safeNumber((0.2 * minFeeLtcPerKb) * finalInputs.length);
+const getEnoughInputs2 = (utxos, amount) => {
+  const sortedUtxos = [...utxos].sort((a, b) => b.amount - a.amount); // Sort by amount (largest first)
+  const finalInputs = [];
+  let total = 0;
+
+  for (const utxo of sortedUtxos) {
+    finalInputs.push(utxo);
+    total += utxo.amount;
+    if (total >= amount) break;
+  }
+
+  if (total < amount) {
+    throw new Error("Not enough UTXOs to cover the required amount");
+  }
+
+  const fee = 0.00001; // Example static fee, adjust dynamically if needed
   return { finalInputs, fee };
 };
+
 
 /********************************************************************
  * BUILD PSBT
