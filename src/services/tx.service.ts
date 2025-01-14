@@ -345,8 +345,9 @@ export const buildLTCTradeTx = async (txConfig: IBuildLTCITTxConfig, isApiMode: 
 
     // Exclude `commitUTXOs` from normal selection
     const normalUTXOs = luRes.data.filter(
-      (utxo) => !commitUTXOs.some((cUtxo) => cUtxo.txid === utxo.txid && cUtxo.vout === utxo.vout)
-    );
+  (utxo: IUTXO) => !commitUTXOs.some((cUtxo: IUTXO) => cUtxo.txid === utxo.txid && cUtxo.vout === utxo.vout)
+);
+
 
     // Select additional inputs
     const inputsRes = getEnoughInputs2(normalUTXOs, amount - commitUTXOs.reduce((sum, utxo) => sum + utxo.amount, 0));
