@@ -327,7 +327,6 @@ export const buildTx = async (txConfig: IBuildTxConfig, isApiMode: boolean) => {
 /********************************************************************
  * BUILD LTC TRADE TX
 */
-
 export const buildLTCTradeTx = async (txConfig: IBuildLTCITTxConfig, isApiMode: boolean) => {
   try {
     console.log('tx config in built ltc trade ' + JSON.stringify(txConfig));
@@ -344,12 +343,17 @@ export const buildLTCTradeTx = async (txConfig: IBuildLTCITTxConfig, isApiMode: 
       throw new Error(`listunspent(buyer): ${luRes.error}`);
     }
 
-    const utxos = [...commitUTXOs, ...luRes.data];
-    console.log('UTXOs:', JSON.stringify(utxos));
+    // Exclude `commitUTXOs` from normal selection
+    const normalUTXOs = luRes.data.filter(
+      (utxo) => !commitUTXOs.some((cUtxo) => cUtxo.txid === utxo.txid && cUtxo.vout === utxo.vout)
+    );
 
-    // Select inputs
-    const inputsRes = getEnoughInputs2(utxos, amount);
-    const { finalInputs, fee } = inputsRes;
+    // Select additional inputs
+    const inputsRes = getEnoughInputs2(normalUTXOs, amount - commitUTXOs.reduce((sum, utxo) => sum + utxo.amount, 0));
+    const { finalInputs: additionalInputs, fee } = inputsRes;
+
+    // Combine `commitUTXOs` and selected inputs
+    const finalInputs = [...commitUTXOs, ...additionalInputs];
 
     if (finalInputs.length === 0) {
       throw new Error('Not enough inputs to cover the transaction.');
@@ -381,16 +385,16 @@ export const buildLTCTradeTx = async (txConfig: IBuildLTCITTxConfig, isApiMode: 
 
       const psbt = new Psbt({ network: networkMap[network] });
 
-      finalInputs.forEach((input: IUTXO) => {
+      finalInputs.forEach((input) => {
         const psbtInput: any = {
           hash: input.txid,
           index: input.vout,
         };
 
-        // Use scripts from commitUTXOs if available
+        // Use scripts from `commitUTXOs` or normal UTXOs
         const matchingUTXO = commitUTXOs.find(
           (utxo) => utxo.txid === input.txid && utxo.vout === input.vout
-        );
+        ) || luRes.data.find((utxo) => utxo.txid === input.txid && utxo.vout === input.vout);
 
         if (matchingUTXO) {
           psbtInput.witnessUtxo = {
