@@ -364,11 +364,12 @@ export const buildLTCTradeTx = async (txConfig: IBuildLTCITTxConfig, isApiMode: 
 
     const _insForRawTx = finalInputs.map(({ txid, vout }) => ({ txid, vout }));
     const totalInputAmount = safeNumber(finalInputs.reduce((a, b) => a + b.amount, 0));
-    const _outsForRawTx: any = {
-      [sellerAddress]: safeNumber(amount - fee),
-      [buyerAddress]: safeNumber(totalInputAmount - amount - fee),
-    };
 
+const _outsForRawTx: any = {
+  [sellerAddress]: safeNumber(amount), // Ensure the seller receives the trade amount
+  [buyerAddress]: safeNumber(totalInputAmount - amount - fee), // Change output for buyer to exclude the trade amount and fee
+};
+    
     console.log('Inputs:', JSON.stringify(_insForRawTx));
     console.log('Outputs:', JSON.stringify(_outsForRawTx));
 
