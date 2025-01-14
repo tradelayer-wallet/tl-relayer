@@ -200,6 +200,8 @@ export const buildPsbt = (buildPsbtOptions: {
     psbt.addOutputs(tx.outs);
 
     const psbtHex = psbt.toHex();
+    
+    console.log('PSBT Details:', JSON.stringify(psbt.data, null, 2));
     return { data: psbtHex };
   } catch (error: any) {
     return { error: error.message };
@@ -409,11 +411,6 @@ export const buildLTCTradeTx = async (txConfig: IBuildLTCITTxConfig, isApiMode: 
         }),
         network,
       });
-
-  
-
-      console.log('PSBT Details:', JSON.stringify(psbtBuildResult.data, null, 2));
-
       
       if (psbtBuildResult.error) {
         throw new Error(psbtBuildResult.error);
