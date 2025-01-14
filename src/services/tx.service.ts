@@ -381,6 +381,7 @@ export const buildLTCTradeTx = async (txConfig: IBuildLTCITTxConfig, isApiMode: 
 
     if (payload) {
       const tx = bitcoin.Transaction.fromHex(rawTx);
+      console.log('re-decoded raw hex '+JSON.stringify(tx))
       const data = Buffer.from(payload, 'utf8');
       const embed = bitcoin.payments.embed({ data: [data] });
 
