@@ -327,13 +327,14 @@ export const buildTx = async (txConfig: IBuildTxConfig, isApiMode: boolean) => {
 /********************************************************************
  * BUILD LTC TRADE TX
 */
+
 export const buildLTCTradeTx = async (txConfig: IBuildLTCITTxConfig, isApiMode: boolean) => {
   try {
-    console.log('tx config in built ltc trade ' + JSON.stringify(txConfig));
+    console.log('Transaction Config:', JSON.stringify(txConfig));
     const { buyerKeyPair, sellerKeyPair, amount, payload, commitUTXOs, network } = txConfig;
 
     const buyerAddress = buyerKeyPair.address;
-    const sellerAddress = sellerKeyPair.address;
+    const sellerAddress = buyerKeyPair.address;
 
     console.log(`Buyer: ${buyerAddress}, Seller: ${sellerAddress}, Amount: ${amount}`);
 
@@ -345,9 +346,8 @@ export const buildLTCTradeTx = async (txConfig: IBuildLTCITTxConfig, isApiMode: 
 
     // Exclude `commitUTXOs` from normal selection
     const normalUTXOs = luRes.data.filter(
-  (utxo: IUTXO) => !commitUTXOs.some((cUtxo: IUTXO) => cUtxo.txid === utxo.txid && cUtxo.vout === utxo.vout)
-);
-
+      (utxo: IUTXO) => !commitUTXOs.some((cUtxo: IUTXO) => cUtxo.txid === utxo.txid && cUtxo.vout === utxo.vout)
+    );
 
     // Select additional inputs
     const inputsRes = getEnoughInputs2(normalUTXOs, amount - commitUTXOs.reduce((sum, utxo) => sum + utxo.amount, 0));
@@ -376,73 +376,60 @@ export const buildLTCTradeTx = async (txConfig: IBuildLTCITTxConfig, isApiMode: 
       throw new Error(`createrawtransaction: ${crtRes.error}`);
     }
 
-    let rawTx = crtRes.data;
+    const rawTx = crtRes.data;
+    console.log('Raw Transaction:', rawTx);
+
+    // Decode raw transaction for verification
+    const tx = bitcoin.Transaction.fromHex(rawTx);
+    console.log('Decoded Raw Transaction:', JSON.stringify(tx));
+
     let psbtHex = '';
 
     if (payload) {
-      const tx = bitcoin.Transaction.fromHex(rawTx);
-      console.log('re-decoded raw hex '+JSON.stringify(tx))
       const data = Buffer.from(payload, 'utf8');
       const embed = bitcoin.payments.embed({ data: [data] });
 
-      const psbt = new Psbt({ network: networkMap[network] });
+      // Use the helper function to build the PSBT
+      const psbtBuildResult = buildPsbt({
+        rawtx: rawTx,
+        inputs: finalInputs.map((input) => {
+          const matchingUTXO = commitUTXOs.find(
+            (utxo: IUTXO) => utxo.txid === input.txid && utxo.vout === input.vout
+          ) || normalUTXOs.find((utxo: IUTXO) => utxo.txid === input.txid && utxo.vout === input.vout);
 
-      finalInputs.forEach((input) => {
-        const psbtInput: any = {
-          hash: input.txid,
-          index: input.vout,
-        };
+          if (!matchingUTXO) {
+            throw new Error(`Missing script information for input: ${input.txid}:${input.vout}`);
+          }
 
-        // Use scripts from `commitUTXOs` or normal UTXOs
-       // Exclude `commitUTXOs` from normal selection
-const normalUTXOs = luRes.data.filter(
-  (utxo: IUTXO) => !commitUTXOs.some((cUtxo: IUTXO) => cUtxo.txid === utxo.txid && cUtxo.vout === utxo.vout)
-);
-
-// Use scripts from `commitUTXOs` or normal UTXOs
-const matchingUTXO = commitUTXOs.find(
-  (utxo: IUTXO) => utxo.txid === input.txid && utxo.vout === input.vout
-) || luRes.data.find((utxo: IUTXO) => utxo.txid === input.txid && utxo.vout === input.vout);
-
-if (matchingUTXO) {
-  if (matchingUTXO.redeemScript) {
-    psbtInput.witnessScript = Buffer.from(matchingUTXO.redeemScript, 'hex'); // Correct labeling
-  }
-} else {
-  throw new Error(`Missing script information for input: ${input.txid}:${input.vout}`);
-}
-
-        psbt.addInput(psbtInput);
+          return {
+            ...input,
+            scriptPubKey: matchingUTXO.scriptPubKey,
+            redeemScript: matchingUTXO.redeemScript,
+          };
+        }),
+        network,
       });
 
-      tx.outs.forEach((output) => {
-        psbt.addOutput({
-          script: output.script,
-          value: output.value,
-        });
-      });
+  
 
-      psbt.addOutput({
-        script: embed.output!,
-        value: 0, // OP_RETURN output
-      });
+      console.log('PSBT Details:', JSON.stringify(psbtBuildResult.data, null, 2));
 
-      // Log PSBT details
-      console.log('PSBT Details:', JSON.stringify(psbt.data, null, 2));
+      
+      if (psbtBuildResult.error) {
+        throw new Error(psbtBuildResult.error);
+      }
 
-      psbtHex = psbt.toHex();
+      psbtHex = psbtBuildResult.data;
     }
 
     return {
-      data: { rawtx: rawTx, inputs: finalInputs, psbtHex: psbtHex },
+      data: { rawtx: rawTx, inputs: finalInputs, psbtHex },
     };
   } catch (error: any) {
     console.error('Error in buildLTCTradeTx:', error.message || error);
     return { error: error.message || 'Failed to build LTC trade transaction' };
   }
 };
-
-
 
 export const buildTradeTx = async (tradeConfig: IBuildLTCITTxConfig) => {
   try {
