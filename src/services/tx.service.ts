@@ -322,8 +322,8 @@ export const buildTx = async (txConfig: IBuildTxConfig, isApiMode: boolean) => {
  * BUILD LTC TRADE TX
  ********************************************************************/export const buildLTCTradeTx = async (txConfig: IBuildLTCITTxConfig, isApiMode: boolean) => {
   try {
-    console.log('tx config in built ltc trade '+JSON.stringify(txConfig))
-    const { buyerKeyPair, sellerKeyPair, amount, payload, commitUTXOs, network } = txConfig
+    console.log('tx config in built ltc trade ' + JSON.stringify(txConfig));
+    const { buyerKeyPair, sellerKeyPair, amount, payload, commitUTXOs, network } = txConfig;
 
     const buyerAddress = buyerKeyPair.address;
     const sellerAddress = sellerKeyPair.address;
@@ -364,40 +364,62 @@ export const buildTx = async (txConfig: IBuildTxConfig, isApiMode: boolean) => {
     }
 
     let rawTx = crtRes.data;
-        let psbtHex = ''
+    let psbtHex = '';
+
     if (payload) {
       const tx = bitcoin.Transaction.fromHex(rawTx);
       const data = Buffer.from(payload, 'utf8');
       const embed = bitcoin.payments.embed({ data: [data] });
-  
+
       const psbt = new Psbt({ network: networkMap[network] });
+
       finalInputs.forEach((input) => {
-        psbt.addInput({
+        const psbtInput: any = {
           hash: input.txid,
           index: input.vout,
+        };
+
+        if (input.scriptPubKey && input.amount) {
+          psbtInput.witnessUtxo = {
+            script: Buffer.from(input.scriptPubKey, 'hex'),
+            value: Math.round(input.amount * 1e8), // Convert LTC to satoshis
+          };
+        }
+
+        if (input.redeemScript) {
+          psbtInput.redeemScript = Buffer.from(input.redeemScript, 'hex');
+        }
+
+        psbt.addInput(psbtInput);
+      });
+
+      tx.outs.forEach((output) => {
+        psbt.addOutput({
+          script: output.script,
+          value: output.value,
         });
       });
 
-      tx.outs.forEach((output) => psbt.addOutput(output));
       psbt.addOutput({
         script: embed.output!,
-        value: 0,
+        value: 0, // OP_RETURN output
       });
 
-// Log PSBT details
-console.log('PSBT Details:', JSON.stringify(psbt.data, null, 2));
+      // Log PSBT details
+      console.log('PSBT Details:', JSON.stringify(psbt.data, null, 2));
 
       psbtHex = psbt.toHex();
     }
 
     return {
-      data: { rawtx: rawTx, inputs: finalInputs, psbtHex: psbtHex  },
+      data: { rawtx: rawTx, inputs: finalInputs, psbtHex: psbtHex },
     };
   } catch (error: any) {
     console.error('Error in buildLTCTradeTx:', error.message || error);
     return { error: error.message || 'Failed to build LTC trade transaction' };
   }
 };
+
 
 export const buildTradeTx = async (tradeConfig: IBuildLTCITTxConfig) => {
   try {
