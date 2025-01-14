@@ -364,12 +364,12 @@ export const buildTx = async (txConfig: IBuildTxConfig, isApiMode: boolean) => {
     }
 
     let rawTx = crtRes.data;
-
+        let psbtHex = ''
     if (payload) {
       const tx = bitcoin.Transaction.fromHex(rawTx);
       const data = Buffer.from(payload, 'utf8');
       const embed = bitcoin.payments.embed({ data: [data] });
-      let psbtHex = ''
+  
       const psbt = new Psbt({ network: networkMap[network] });
       finalInputs.forEach((input) => {
         psbt.addInput({
