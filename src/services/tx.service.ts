@@ -137,11 +137,11 @@ export const safeNumber = (value: number, decimals = 8): number => {
  * Gathers enough UTXOs for a target amount. A simplistic approach:
  */
 const getEnoughInputs2 = (
-  utxos: Array<{ txid: string; vout: number; amount: number }>,
+  utxos: IUTXO[],
   amount: number
-): { finalInputs: Array<{ txid: string; vout: number; amount: number }>; fee: number } => {
+): { finalInputs: IUTXO[]; fee: number } => {
   const sortedUtxos = [...utxos].sort((a, b) => b.amount - a.amount); // Sort by amount (largest first)
-  const finalInputs: Array<{ txid: string; vout: number; amount: number }> = [];
+  const finalInputs: IUTXO[] = [];
   let total = 0;
 
   for (const utxo of sortedUtxos) {
