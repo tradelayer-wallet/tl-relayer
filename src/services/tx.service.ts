@@ -323,7 +323,7 @@ export const buildTx = async (txConfig: IBuildTxConfig, isApiMode: boolean) => {
  ********************************************************************/export const buildLTCTradeTx = async (txConfig: IBuildLTCITTxConfig, isApiMode: boolean) => {
   try {
     console.log('tx config in built ltc trade '+JSON.stringify(txConfig))
-    const { buyerKeyPair, sellerKeyPair, amount, payload, commitUTXOs, network } = txConfig.buildLTCITTxConfig;
+    const { buyerKeyPair, sellerKeyPair, amount, payload, commitUTXOs, network } = txConfig
 
     const buyerAddress = buyerKeyPair.address;
     const sellerAddress = sellerKeyPair.address;
