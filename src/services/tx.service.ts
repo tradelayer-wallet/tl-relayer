@@ -5,7 +5,7 @@ import { rpcClient } from "../config/rpc.config";  // Your configured RPC client
 /********************************************************************
  * Type Definitions (adjust as needed in your environment)
  ********************************************************************/
-export interface IInput {
+export interface IUTXO {
   txid: string;
   amount: number;
   confirmations: number;
