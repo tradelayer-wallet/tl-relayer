@@ -404,13 +404,8 @@ const matchingUTXO = commitUTXOs.find(
 ) || luRes.data.find((utxo: IUTXO) => utxo.txid === input.txid && utxo.vout === input.vout);
 
 if (matchingUTXO) {
-  psbtInput.witnessUtxo = {
-    script: Buffer.from(matchingUTXO.scriptPubKey, 'hex'),
-    value: Math.round(matchingUTXO.amount * 1e8),
-  };
-
   if (matchingUTXO.redeemScript) {
-    psbtInput.redeemScript = Buffer.from(matchingUTXO.redeemScript, 'hex');
+    psbtInput.witnessScript = Buffer.from(matchingUTXO.redeemScript, 'hex'); // Correct labeling
   }
 } else {
   throw new Error(`Missing script information for input: ${input.txid}:${input.vout}`);
