@@ -136,8 +136,8 @@ export const safeNumber = (value: number, decimals = 8): number => {
 /**
  * Gathers enough UTXOs for a target amount. A simplistic approach:
  */
-const getEnoughInputs2 = (_inputs: IInput[], amount: number) => {
-  const finalInputs: IInput[] = [];
+const getEnoughInputs2 = (_inputs: IUTXO[], amount: number) => {
+  const finalInputs: IUTXO[] = [];
   _inputs.forEach((u) => {
     const currentSum = finalInputs.reduce((a, b) => a + b.amount, 0);
     const needed = safeNumber(amount + ((0.2 * minFeeLtcPerKb) * (finalInputs.length + 1)));
@@ -154,14 +154,14 @@ const getEnoughInputs2 = (_inputs: IInput[], amount: number) => {
  *
  * Basic "buildPsbt" functionality: 
  * - Takes rawTx hex
- * - Takes array of inputs (IInput[]), 
+ * - Takes array of inputs (IUTXO[]), 
  * - Returns a PSBT hex (not signed).
  ********************************************************************/
 import { Psbt, Transaction } from 'bitcoinjs-lib';
 
 export const buildPsbt = (buildPsbtOptions: {
   rawtx: string,
-  inputs: IInput[],
+  inputs: IUTXO[],
   network: string
 }) => {
   try {
@@ -172,7 +172,7 @@ export const buildPsbt = (buildPsbtOptions: {
 
     const psbt = new Psbt({ network: _network });
 
-    inputs.forEach((input: IInput) => {
+    inputs.forEach((input: IUTXO) => {
       const hash = input.txid;
       const index = input.vout;
       const value = safeNumber(input.amount * 1e8, 0);
@@ -228,7 +228,7 @@ export const buildTx = async (txConfig: IBuildTxConfig, isApiMode: boolean) => {
     }
 
     // 2) Sort and pick enough inputs
-    const _utxos = (luRes.data as IInput[]).sort((a, b) => b.amount - a.amount);
+    const _utxos = (luRes.data as IUTXO[]).sort((a, b) => b.amount - a.amount);
     console.log('UTXOs:', JSON.stringify(_utxos));
 
     const inputsRes = getEnoughInputs2(_utxos, amount!);
