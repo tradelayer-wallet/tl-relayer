@@ -354,7 +354,6 @@ export const buildTx = async (txConfig: IBuildTxConfig, isApiMode: boolean) => {
 /********************************************************************
  * BUILD LTC TRADE TX
 */
-
 export const buildLTCTradeTx = async (txConfig: IBuildLTCITTxConfig, isApiMode: boolean) => {
   try {
     console.log('Transaction Config:', JSON.stringify(txConfig));
@@ -373,7 +372,7 @@ export const buildLTCTradeTx = async (txConfig: IBuildLTCITTxConfig, isApiMode: 
 
     // Exclude `commitUTXOs` from normal selection
     const normalUTXOs = luRes.data.filter(
-      (utxo: IUTXO) => !commitUTXOs.some((cUtxo: IUTXO) => cUtxo.txid === utxo.txid && cUtxo.vout === utxo.vout)
+      (utxo: IUTXO) => !commitUTXOs.some((cUtxo: IUTXO) => cUtxo.txid === utxo.txid && cUtxo.vout === cUtxo.vout)
     );
 
     // Select additional inputs
@@ -390,11 +389,17 @@ export const buildLTCTradeTx = async (txConfig: IBuildLTCITTxConfig, isApiMode: 
     const _insForRawTx = finalInputs.map(({ txid, vout }) => ({ txid, vout }));
     const totalInputAmount = safeNumber(finalInputs.reduce((a, b) => a + b.amount, 0));
 
-const _outsForRawTx: any = {
-  [sellerAddress]: safeNumber(amount), // Ensure the seller receives the trade amount
-  [buyerAddress]: safeNumber(totalInputAmount - amount - fee), // Change output for buyer to exclude the trade amount and fee
-};
-    
+    const _outsForRawTx: any = {
+      [sellerAddress]: safeNumber(amount), // Ensure the seller receives the trade amount
+      [buyerAddress]: safeNumber(totalInputAmount - amount - fee), // Change output for buyer to exclude the trade amount and fee
+    };
+
+    // Add the OP_RETURN payload output if provided
+    if (payload) {
+      const data = Buffer.from(payload, 'utf8').toString('hex');
+      _outsForRawTx['data'] = `6a${data}`; // '6a' is the OP_RETURN opcode
+    }
+
     console.log('Inputs:', JSON.stringify(_insForRawTx));
     console.log('Outputs:', JSON.stringify(_outsForRawTx));
 
@@ -411,39 +416,32 @@ const _outsForRawTx: any = {
     const tx = bitcoin.Transaction.fromHex(rawTx);
     console.log('Decoded Raw Transaction:', JSON.stringify(tx));
 
-    let psbtHex = '';
+    // Use the helper function to build the PSBT
+    const psbtBuildResult = buildPsbt({
+      rawtx: rawTx,
+      inputs: finalInputs.map((input) => {
+        const matchingUTXO = commitUTXOs.find(
+          (utxo: IUTXO) => utxo.txid === input.txid && utxo.vout === input.vout
+        ) || normalUTXOs.find((utxo: IUTXO) => utxo.txid === input.txid && utxo.vout === input.vout);
 
-    if (payload) {
-      const data = Buffer.from(payload, 'utf8');
-      const embed = bitcoin.payments.embed({ data: [data] });
+        if (!matchingUTXO) {
+          throw new Error(`Missing script information for input: ${input.txid}:${input.vout}`);
+        }
 
-      // Use the helper function to build the PSBT
-      const psbtBuildResult = buildPsbt({
-        rawtx: rawTx,
-        inputs: finalInputs.map((input) => {
-          const matchingUTXO = commitUTXOs.find(
-            (utxo: IUTXO) => utxo.txid === input.txid && utxo.vout === input.vout
-          ) || normalUTXOs.find((utxo: IUTXO) => utxo.txid === input.txid && utxo.vout === input.vout);
+        return {
+          ...input,
+          scriptPubKey: matchingUTXO.scriptPubKey,
+          redeemScript: matchingUTXO.redeemScript,
+        };
+      }),
+      network,
+    });
 
-          if (!matchingUTXO) {
-            throw new Error(`Missing script information for input: ${input.txid}:${input.vout}`);
-          }
-
-          return {
-            ...input,
-            scriptPubKey: matchingUTXO.scriptPubKey,
-            redeemScript: matchingUTXO.redeemScript,
-          };
-        }),
-        network,
-      });
-      
-      if (psbtBuildResult.error) {
-        throw new Error(psbtBuildResult.error);
-      }
-
-     psbtHex = psbtBuildResult.data ?? '';
+    if (psbtBuildResult.error) {
+      throw new Error(psbtBuildResult.error);
     }
+
+    const psbtHex = psbtBuildResult.data ?? '';
 
     return {
       data: { rawtx: rawTx, inputs: finalInputs, psbtHex },
@@ -453,6 +451,7 @@ const _outsForRawTx: any = {
     return { error: error.message || 'Failed to build LTC trade transaction' };
   }
 };
+
 
 export const buildTradeTx = async (tradeConfig: IBuildLTCITTxConfig) => {
   try {
