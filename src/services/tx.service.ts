@@ -171,16 +171,19 @@ import { Psbt, Transaction } from 'bitcoinjs-lib';
 export const buildPsbt = (buildPsbtOptions: {
   rawtx: string,
   inputs: IUTXO[],
-  network: string
+  network: string,
+  payload?: string, // Add the optional payload parameter
 }) => {
   try {
-    const { rawtx, inputs, network } = buildPsbtOptions;
-    const _network = networks[network];  // e.g. LTC, BTC, etc.
+    const { rawtx, inputs, network, payload } = buildPsbtOptions;
+    const _network = networks[network]; // e.g. LTC, BTC, etc.
 
     const tx = Transaction.fromHex(rawtx);
-    console.log('tx outputs ' +JSON.stringify(tx.outs))
+    console.log('Transaction outputs before adding payload:', JSON.stringify(tx.outs));
+
     const psbt = new Psbt({ network: _network });
 
+    // Add inputs
     inputs.forEach((input: IUTXO) => {
       const hash = input.txid;
       const index = input.vout;
@@ -197,22 +200,38 @@ export const buildPsbt = (buildPsbtOptions: {
       psbt.addInput(inputObj);
     });
 
+    // Add existing outputs from the raw transaction
     tx.outs.forEach((output) => {
       psbt.addOutput({
-        script: output.script, // Already a Buffer
-        value: Number(output.value), // Ensure value is a BigInt
+        script: output.script,
+        value: output.value,
       });
     });
 
+    // Add OP_RETURN payload if provided
+    if (payload) {
+      const data = Buffer.from(payload, 'utf8');
+      const embed = bitcoin.payments.embed({ data: [data] });
+
+      psbt.addOutput({
+        script: embed.output!, // Ensure this is not null
+        value: 0, // OP_RETURN output has no value
+      });
+
+      console.log('Added OP_RETURN output with payload:', payload);
+    }
+
+    console.log('Transaction outputs after adding payload:', JSON.stringify(psbt.data.outputs));
 
     const psbtHex = psbt.toHex();
-    
     console.log('PSBT Details:', JSON.stringify(psbt.data, null, 2));
+
     return { data: psbtHex };
   } catch (error: any) {
     return { error: error.message };
   }
 };
+
 
 export const decodeTx = async (rawTx: string) => {
   try {
