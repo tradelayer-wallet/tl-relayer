@@ -395,10 +395,21 @@ export const buildLTCTradeTx = async (txConfig: IBuildLTCITTxConfig, isApiMode: 
     };
 
     // Add the OP_RETURN payload output if provided
-    if (payload) {
-      const data = Buffer.from(payload, 'utf8').toString('hex');
-      _outsForRawTx['data'] = `6a${data}`; // '6a' is the OP_RETURN opcode
-    }
+  if (payload) {
+  // Normalize the payload to ensure no accidental characters
+  const normalizedPayload = payload.trim(); 
+  const data = Buffer.from(normalizedPayload, 'utf8').toString('hex');
+  console.log('Payload Data (hex):', data);
+
+  // Add an OP_RETURN output as part of _outsForRawTx
+  const opReturnOutput = { 
+    script: `6a${data}`, // 6a is the OP_RETURN opcode
+    value: 0,            // OP_RETURN outputs always have a value of 0
+  };
+
+  _outsForRawTx['opReturnOutput'] = opReturnOutput; 
+}
+
 
     console.log('Inputs:', JSON.stringify(_insForRawTx));
     console.log('Outputs:', JSON.stringify(_outsForRawTx));
