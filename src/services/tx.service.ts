@@ -200,7 +200,7 @@ export const buildPsbt = (buildPsbtOptions: {
     tx.outs.forEach((output) => {
       psbt.addOutput({
         script: output.script, // Already a Buffer
-        value: BigInt(output.value), // Ensure value is a BigInt
+        value: Number(output.value), // Ensure value is a BigInt
       });
     });
 
