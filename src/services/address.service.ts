@@ -29,28 +29,29 @@ export const fundAddress = async (address: string) => {
     }
     return { error: 'Faucet is Allowed only in TESTNET' };
 };
-
 export const importPubKey = async (server: any, params: any[]): Promise<{ data?: boolean; error?: string }> => {
     try {
         const pubkey = params[0];
+        const address = params[1]; // Address derived from the public key
         if (!pubkey) throw new Error("Pubkey not provided");
 
-        const label = "wallet/tl-relay";
-        // Check if the address is already associated with the label
+        const walletPath = "tl-relay"; // Wallet path to use in RPC calls
+
+        // Check if the address is already associated with the wallet
         try {
-            const addressList = await rpcClient.call(`getaddressesbylabel`, label);
+            const addressList = await rpcClient.call(`/wallet/${walletPath}/getaddressesbylabel`, "default");
             // If no error, check if the address already exists
-            const addressExists = Object.keys(addressList.data || {}).includes(params[1]); // Pass the corresponding address
+            const addressExists = Object.keys(addressList.data || {}).includes(address);
             if (addressExists) {
                 return { data: false }; // Address is already imported
             }
         } catch (error: unknown) {
             const errorMessage = error instanceof Error ? error.message : "An unexpected error occurred";
-            throw new Error(errorMessage);
+            throw new Error(`Error checking addresses: ${errorMessage}`);
         }
 
-        // Import the public key if it isn't associated with the label
-        const ipkRes = await rpcClient.call(`importpubkey`, pubkey, label, false);
+        // Import the public key if it isn't associated with the wallet
+        const ipkRes = await rpcClient.call(`/wallet/${walletPath}/importpubkey`, pubkey, "default", false);
         if (ipkRes.error) throw new Error(ipkRes.error);
 
         saveLog(ELogType.PUBKEYS, pubkey);
@@ -60,3 +61,4 @@ export const importPubKey = async (server: any, params: any[]): Promise<{ data?:
         return { error: errorMessage };
     }
 };
+
