@@ -35,7 +35,7 @@ export const importPubKey = async (server: any, params: any[]): Promise<{ data?:
         const pubkey = params[0];
         if (!pubkey) throw new Error("Pubkey not provided");
 
-        const label = "tl-relay";
+        const label = "wallet/tl-relay";
         // Check if the address is already associated with the label
         try {
             const addressList = await rpcClient.call(`getaddressesbylabel`, label);
