@@ -39,7 +39,7 @@ export const importPubKey = async (server: any, params: any[]): Promise<{ data?:
 
         // Check if the address is already associated with the wallet
         try {
-            const addressList = await rpcClient.call(`/wallet/${walletPath}/getaddressesbylabel`, "default");
+            const addressList = await rpcClient.call(`getaddressesbylabel`, "default");
             // If no error, check if the address already exists
             const addressExists = Object.keys(addressList.data || {}).includes(address);
             if (addressExists) {
@@ -51,7 +51,7 @@ export const importPubKey = async (server: any, params: any[]): Promise<{ data?:
         }
 
         // Import the public key if it isn't associated with the wallet
-        const ipkRes = await rpcClient.call(`/wallet/${walletPath}/importpubkey`, pubkey, "default", false);
+        const ipkRes = await rpcClient.call(`importpubkey`, pubkey, "default", false);
         if (ipkRes.error) throw new Error(ipkRes.error);
 
         saveLog(ELogType.PUBKEYS, pubkey);
