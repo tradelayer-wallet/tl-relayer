@@ -35,7 +35,7 @@ export const importPubKey = async (server: any, params: any[]): Promise<{ data?:
         const address = params[1]; // Address derived from the public key
         if (!pubkey) throw new Error("Pubkey not provided");
 
-        const walletPath = "tl-relay"; // Wallet path to use in RPC calls
+        const walletPath = ""; // Wallet path to use in RPC calls
 
         // Check if the address is already associated with the wallet
         try {
