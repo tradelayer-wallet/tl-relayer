@@ -20,7 +20,7 @@ export const listunspent = async (
 
         console.log('params in listunspent ' + address + ' ' + pubkey);
 
-                const label = "wallet/tl-relay";
+                const label = "";
         // Validate the address
         const addressInfo = await rpcClient.call(`getaddressinfo`, address);
         console.log(JSON.stringify(addressInfo));
