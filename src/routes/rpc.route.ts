@@ -155,21 +155,25 @@ async function handleGenericRpc(request: any, reply: any) {
         }
 
         if (method === "tl_listContractSeries") {
-            console.log('params in tl_listContractSeries call ' + JSON.stringify(params));
-            // handles both { contractId: X } and [X]
-            let payload;
-            if (params && params.contractId !== undefined) {
-                payload = { contractId: params.contractId };
-            } else if (Array.isArray(params) && params.length > 0) {
-                payload = { contractId: params[0] };
-            } else {
-                payload = {};
+                console.log('params in tl_listContractSeries call ' + JSON.stringify(params));
+                let payload: any;
+            
+                if (params && typeof params === "object" && !Array.isArray(params) && "contractId" in params) {
+                    // params is an object with contractId property
+                    payload = { contractId: (params as { contractId: any }).contractId };
+                } else if (Array.isArray(params) && params.length > 0) {
+                    // params is an array, use first element
+                    payload = { contractId: params[0] };
+                } else {
+                    payload = {};
+                }
+            
+                const response = await axios.post(`http://localhost:3000/${method}`, payload);
+                console.log('response ' + JSON.stringify(response.data));
+                reply.send(response.data);
+                return;
             }
-            const response = await axios.post(`http://localhost:3000/${method}`, payload);
-            console.log('response ' + JSON.stringify(response.data));
-            reply.send(response.data);
-            return;
-        }
+
 
         // Forward "tl_" prefixed methods to localhost:3000
         if (method.startsWith("tl_")) {
