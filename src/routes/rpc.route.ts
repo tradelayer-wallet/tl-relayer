@@ -11,7 +11,7 @@ export const rpcRoutes = (fastify: FastifyInstance, opts: any, done: any) => {
     fastify.post('/payload', handlePayload);
     fastify.post('/tl_getAttestations', handleGetAttestations);
     fastify.post('tl_getChannelColumn', handleGetChannelColumn)
-    fastify.post('/tl_getContractSeries', handleListContractSeries)
+    fastify.post('/tl_listContractSeries', handleListContractSeries)
     fastify.post('/:method', handleGenericRpc)
 
     done();
