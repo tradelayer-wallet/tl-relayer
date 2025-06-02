@@ -11,7 +11,8 @@ export const rpcRoutes = (fastify: FastifyInstance, opts: any, done: any) => {
     fastify.post('/payload', handlePayload);
     fastify.post('/tl_getAttestations', handleGetAttestations);
     fastify.post('tl_getChannelColumn', handleGetChannelColumn)
-    fastify.post('/:method', handleGenericRpc);
+    fastify.post('/tl_getContractSeries', handleListContractSeries)
+    fastify.post('/:method', handleGenericRpc)
 
     done();
 };
@@ -40,6 +41,36 @@ async function handlePayload(request: any, reply: any) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
         console.error(`Error in payload encoding:`, errorMessage);
         reply.status(500).send({ error: `Error encoding payload: ${errorMessage}` });
+    }
+}
+
+async function handleListContractSeries(
+    request: any,
+    reply: any
+) {
+    try {
+        // Accept both top-level and params contractId
+        let contractId: number | undefined;
+
+        if ('contractId' in request.body && request.body.contractId !== undefined) {
+            contractId = request.body.contractId;
+        } else if ('params' in request.body && request.body.params?.contractId !== undefined) {
+            contractId = request.body.params.contractId;
+        }
+
+        if (typeof contractId !== 'number') {
+            reply.status(400).send({ error: "Missing or invalid contractId" });
+            return;
+        }
+
+        // Forward to listener
+        const axiosRes = await axios.post('http://localhost:3000/tl_listContractSeries', { contractId });
+        reply.send(axiosRes.data);
+
+    } catch (error) {
+        console.error('Error in handleListContractSeries:', error);
+        const message = error instanceof Error ? error.message : String(error);
+        reply.status(500).send({ error: message || "Unknown error" });
     }
 }
 
