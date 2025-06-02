@@ -154,6 +154,23 @@ async function handleGenericRpc(request: any, reply: any) {
             return;
         }
 
+        if (method === "tl_listContractSeries") {
+            console.log('params in tl_listContractSeries call ' + JSON.stringify(params));
+            // handles both { contractId: X } and [X]
+            let payload;
+            if (params && params.contractId !== undefined) {
+                payload = { contractId: params.contractId };
+            } else if (Array.isArray(params) && params.length > 0) {
+                payload = { contractId: params[0] };
+            } else {
+                payload = {};
+            }
+            const response = await axios.post(`http://localhost:3000/${method}`, payload);
+            console.log('response ' + JSON.stringify(response.data));
+            reply.send(response.data);
+            return;
+        }
+
         // Forward "tl_" prefixed methods to localhost:3000
         if (method.startsWith("tl_")) {
             const response = await axios.post(`http://localhost:3000/${method}`, { params });
