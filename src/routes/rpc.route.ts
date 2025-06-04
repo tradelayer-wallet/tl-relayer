@@ -11,8 +11,8 @@ export const rpcRoutes = (fastify: FastifyInstance, opts: any, done: any) => {
     fastify.post('/payload', handlePayload);
     fastify.post('/tl_getAttestations', handleGetAttestations);
     fastify.post('tl_getChannelColumn', handleGetChannelColumn)
+    fastify.post('/:method', handleGenericRpc);
     fastify.post('/tl_listContractSeries', handleListContractSeries)
-    fastify.post('/:method', handleGenericRpc)
 
     done();
 };
@@ -44,6 +44,7 @@ async function handlePayload(request: any, reply: any) {
     }
 }
 
+// Handler for POST /tl_listContractSeries
 async function handleListContractSeries(
     request: any,
     reply: any
@@ -64,6 +65,7 @@ async function handleListContractSeries(
         }
 
         // Forward to listener
+        console.log('about to call list contract series '+contractId)
         const axiosRes = await axios.post('http://localhost:3000/tl_listContractSeries', { contractId });
         reply.send(axiosRes.data);
 
@@ -186,29 +188,30 @@ async function handleGenericRpc(request: any, reply: any) {
         }
 
         if (method === "tl_listContractSeries") {
-                console.log('params in tl_listContractSeries call ' + JSON.stringify(params));
-                let payload: any;
-            
-                if (params && typeof params === "object" && !Array.isArray(params) && "contractId" in params) {
-                    // params is an object with contractId property
-                    payload = { contractId: (params as { contractId: any }).contractId };
-                } else if (Array.isArray(params) && params.length > 0) {
-                    // params is an array, use first element
-                    payload = { contractId: params[0] };
-                } else {
-                    payload = {};
-                }
-            
-                const response = await axios.post(`http://localhost:3000/${method}`, payload);
-                console.log('response ' + JSON.stringify(response.data));
-                reply.send(response.data);
-                return;
+            console.log('params in tl_listContractSeries call ' + JSON.stringify(params));
+            let payload: any;
+
+            if (params && typeof params === "object" && !Array.isArray(params) && "contractId" in params) {
+                // params is an object with contractId property
+                payload = { contractId: (params as { contractId: any }).contractId };
+            } else if (Array.isArray(params) && params.length > 0) {
+                // params is an array, use first element
+                payload = { contractId: params[0] };
+            } else {
+                payload = {};
             }
 
+            const response = await axios.post(`http://localhost:3000/${method}`, payload);
+            console.log('response ' + JSON.stringify(response.data));
+            reply.send(response.data);
+            return;
+        }
 
         // Forward "tl_" prefixed methods to localhost:3000
         if (method.startsWith("tl_")) {
+            console.log('params in tl method call '+JSON.stringify(params))
             const response = await axios.post(`http://localhost:3000/${method}`, { params });
+            console.log('response '+JSON.stringify(response))
             reply.send(response.data);
             return;
         }
