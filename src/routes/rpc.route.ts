@@ -172,6 +172,9 @@ async function handleGenericRpc(request: any, reply: any) {
             'sendrawtransaction',
             'decoderawtransaction',
             'validateaddress',
+            'tl_channelBalanceForCommiter',
+            'tl_contractTradeHistoryForAddress',
+            'tl_tokenTradeHistoryForAddress'
         ];
 
         if (!allowedMethods.includes(method)) {
