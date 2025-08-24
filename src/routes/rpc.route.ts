@@ -3,6 +3,7 @@ import { rpcClient } from "../config/rpc.config"
 import { getAttestationPayload, importPubKey } from "../services/address.service";
 import { listunspent } from "../services/sochain.service";
 import { ELogType, saveLog } from "../services/utils.service";
+import axios from "axios";
 
 const allowedMethods = [
     'tl_getallbalancesforaddress',
@@ -52,6 +53,34 @@ export const rpcRoutes = (fastify: FastifyInstance, opts: any, done: any) => {
             if (method === 'tl_createpayload_attestation') {
                 const res = await getAttestationPayload(fastify, request.ip);
                 reply.send(res);
+                return;
+            }
+
+            
+            if (method === 'tl_totalTradeHistoryForAddress') {
+                const { address } = request.query as { address: string };
+                const res = await axios.get("http://localhost:3000/tl_totalTradeHistoryForAddress", {
+                    params: { address },
+                });
+                reply.send(res.data);
+                return;
+            }
+            
+            if (method === 'tl_channelBalanceForCommiter') {
+                const { address, propertyId } = request.query as { address: string; propertyId: number };
+                const res = await axios.get("http://localhost:3000/tl_channelBalanceForCommiter", {
+                    params: { address, propertyId },
+                });
+                reply.send(res.data);
+                return;
+            }
+
+            if (method === 'tl_contractTradeHistoryForAddress') {
+                const { address, propertyId } = request.query as { address: string; propertyId: number };
+                const res = await axios.get("http://localhost:3000/tl_contractTradeHistoryForAddress", {
+                    params: { address, propertyId },
+                });
+                reply.send(res.data);
                 return;
             }
 
