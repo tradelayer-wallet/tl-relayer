@@ -17,6 +17,9 @@ const allowedMethods = [
     'tl_listnodereward_addresses',
     'tl_getfullposition',
     'tl_decodetransaction',
+    'tl_tokenTradeHistoryForAddress',
+    'tl_contractTradeHistoryForAddress',
+    'tl_channelBalanceForCommiter',
     //
     'tl_createpayload_commit_tochannel',
     'tl_createpayload_withdrawal_fromchannel',
