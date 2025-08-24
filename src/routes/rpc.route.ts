@@ -76,9 +76,18 @@ export const rpcRoutes = (fastify: FastifyInstance, opts: any, done: any) => {
             }
 
             if (method === 'tl_contractTradeHistoryForAddress') {
-                const { address, propertyId } = request.query as { address: string; propertyId: number };
+                const { address, contractId } = request.query as { address: string; propertyId: number };
                 const res = await axios.get("http://localhost:3000/tl_contractTradeHistoryForAddress", {
-                    params: { address, propertyId },
+                    params: { address, contractId },
+                });
+                reply.send(res.data);
+                return;
+            }
+
+            if (method === 'tl_tokenTradeHistoryForAddress') {
+                const { address, propertyId1, propertyId2 } = request.query as { address: string; propertyId: number };
+                const res = await axios.get("http://localhost:3000/tl_contractTradeHistoryForAddress", {
+                    params: { address, propertyId1, propertyId2 },
                 });
                 reply.send(res.data);
                 return;
