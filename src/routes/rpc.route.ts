@@ -21,6 +21,7 @@ const allowedMethods = [
     'tl_tokenTradeHistoryForAddress',
     'tl_contractTradeHistoryForAddress',
     'tl_channelBalanceForCommiter',
+    'tl_getMaxSynth',
     //
     'tl_createpayload_commit_tochannel',
     'tl_createpayload_withdrawal_fromchannel',
@@ -76,7 +77,7 @@ export const rpcRoutes = (fastify: FastifyInstance, opts: any, done: any) => {
             }
 
             if (method === 'tl_contractTradeHistoryForAddress') {
-                const { address, contractId } = request.query as { address: string; propertyId: number };
+                const { address, contractId } = request.query as { address: string; contractId: number };
                 const res = await axios.get("http://localhost:3000/tl_contractTradeHistoryForAddress", {
                     params: { address, contractId },
                 });
@@ -85,8 +86,18 @@ export const rpcRoutes = (fastify: FastifyInstance, opts: any, done: any) => {
             }
 
             if (method === 'tl_tokenTradeHistoryForAddress') {
-                const { address, propertyId1, propertyId2 } = request.query as { address: string; propertyId: number };
+                const { address, propertyId1, propertyId2 } = request.query as { address: string; propertyId1: number, propertyId2:number };
                 const res = await axios.get("http://localhost:3000/tl_contractTradeHistoryForAddress", {
+                    params: { address, propertyId1, propertyId2 },
+                });
+                reply.send(res.data);
+                return;
+            }
+
+            
+            if (method === 'tl_tokenTradeHistoryForAddress') {
+                const { address, propertyId } = request.query as { address: string; propertyId: number };
+                const res = await axios.get("http://localhost:3000/tl_getMaxSynth", {
                     params: { address, propertyId1, propertyId2 },
                 });
                 reply.send(res.data);
