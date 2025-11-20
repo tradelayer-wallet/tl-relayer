@@ -18,6 +18,32 @@ export interface IUTXO {
 import { Network } from 'bitcoinjs-lib';
 
 export const networks: Record<string, Network> = {
+   BTC: {
+    messagePrefix: '\x18Bitcoin Signed Message:\n',
+    bech32: 'bc',
+    bip32: {
+      public: 0x0488b21e,
+      private: 0x0488ade4,
+    },
+    pubKeyHash: 0x00,
+    scriptHash: 0x05,
+    wif: 0x80,
+  },
+
+  // -----------------------------
+  // BITCOIN TESTNET / SIGNET
+  // -----------------------------
+  BTCTEST: {
+    messagePrefix: '\x18Bitcoin Signed Message:\n',
+    bech32: 'tb',
+    bip32: {
+      public: 0x043587cf,
+      private: 0x04358394,
+    },
+    pubKeyHash: 0x6f,
+    scriptHash: 0xc4,
+    wif: 0xef,
+  },
   LTC: {
     messagePrefix: '\x19Litecoin Signed Message:\n',
     bip32: {
@@ -89,6 +115,8 @@ export type TClient = (method: string, ...args: any[]) => Promise<any>;
 const networkMap: Record<string, bitcoin.Network> = {
   LTC: networks.LTC,
   LTCTEST: networks.LTCTEST,
+  BTC: networks.BTC,
+  BTCTEST: networks.BTCTEST
 };
 
 // Note: If you have a global fastifyServer instance, you can adapt this.
@@ -127,6 +155,49 @@ export const jsTlApi: TClient = async (method: string, params: any[] = []) => {
  * Helpers
  ********************************************************************/
 const minFeeLtcPerKb = 0.0001;
+
+export function computeMultisigData(
+  m: number,
+  pubKeys: string[],
+  network: string,
+) {
+  const _network = networks[network];
+  if (!_network) throw new Error(`Unknown network: ${network}`);
+
+  // Sort pubkeys deterministically
+  const pubBufs = pubKeys
+    .map(k => Buffer.from(k, 'hex'))
+    .sort(Buffer.compare);
+
+  // Create the P2MS witness script
+  const multisigPayment = bitcoin.payments.p2ms({
+    m,
+    pubkeys: pubBufs,
+  });
+
+  if (!multisigPayment.output) {
+    throw new Error("Failed to build multisig witness script");
+  }
+
+  // Wrap in P2WSH
+  const p2wsh = bitcoin.payments.p2wsh({
+    redeem: { output: multisigPayment.output },
+    network: _network,
+  });
+
+  if (!p2wsh.output || !p2wsh.address) {
+    throw new Error("Failed to compute P2WSH script or address");
+  }
+
+  return {
+    m,
+    pubKeys,
+    redeemScript: multisigPayment.output.toString('hex'),
+    scriptPubKey: p2wsh.output.toString('hex'),
+    address: p2wsh.address,
+  };
+}
+
 
 /** Safe number helper, to avoid float issues. Customize as needed. */
 export const safeNumber = (value: number, decimals = 8): number => {
