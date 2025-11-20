@@ -116,5 +116,35 @@ export const txRoute = (fastify: FastifyInstance, opts: any, done: any) => {
   }
 });
 
+    // relayer/src/routes/tx.route.ts
+
+server.post('/finalizePsbt', async (req, reply) => {
+    try {
+        const { psbtBase64, network } = req.body;
+
+        if (!psbtBase64) {
+            return reply.send({ success: false, error: "Missing PSBT" });
+        }
+
+        const bitcoin = require('bitcoinjs-lib');
+        const netParams = networks[network] || networks.LTC;
+
+        const psbt = bitcoin.Psbt.fromBase64(psbtBase64, { network: netParams });
+        
+        psbt.finalizeAllInputs();
+        const txHex = psbt.extractTransaction().toHex();
+
+        return reply.send({ success: true, finalHex: txHex });
+
+    } catch (err: any) {
+        console.error("finalizePsbt error", err);
+        return reply.send({
+            success: false,
+            error: err?.message || "Finalization failed",
+        });
+    }
+});
+
+
     done();
 };
