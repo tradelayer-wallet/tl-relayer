@@ -8,6 +8,7 @@ import {
     buildLTCTradeTx,
     IBuildTxConfig,
     IBuildLTCITTxConfig,
+    computeMultisig
 } from "../services/tx.service";
 
 export const txRoute = (fastify: FastifyInstance, opts: any, done: any) => {
@@ -51,16 +52,38 @@ export const txRoute = (fastify: FastifyInstance, opts: any, done: any) => {
 
     // Build generic transaction
    fastify.post('/buildTx', async (request: FastifyRequest<{ Body: { params: IBuildTxConfig } }>, reply) => {
-    try {
-        const { params } = request.body; // Extract params
-        console.log('txConfig:', params); // Log txConfig for debugging
-        const result = await buildTx(params, false);
-        reply.send(result);
-    } catch (error) {
-        console.error('Error in /buildTx route:', error);
-        reply.status(500).send({ error: 'Failed to build transaction' });
-    }
-});
+        try {
+            const { params } = request.body; // Extract params
+            console.log('txConfig:', params); // Log txConfig for debugging
+            const result = await buildTx(params, false);
+            reply.send(result);
+        } catch (error) {
+            console.error('Error in /buildTx route:', error);
+            reply.status(500).send({ error: 'Failed to build transaction' });
+        }
+    });
+
+    fastify.post('/tx/multisig', async (req, reply) => {
+      try {
+        const { m, pubKeys, network } = req.body;
+    
+        if (!Array.isArray(pubKeys) || pubKeys.length < m) {
+          throw new Error("Invalid pubkey list or m");
+        }
+    
+        const msData = computeMultisigData(m, pubKeys, network);
+    
+        reply.send({
+          success: true,
+          data: msData
+        });
+      } catch (e: any) {
+        reply.send({
+          success: false,
+          error: e.message
+        });
+      }
+    });
 
 
     // Build trade transaction
