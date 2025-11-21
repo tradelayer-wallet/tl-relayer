@@ -118,7 +118,7 @@ export const txRoute = (fastify: FastifyInstance, opts: any, done: any) => {
 
     // relayer/src/routes/tx.route.ts
 
-server.post('/finalizePsbt', async (req, reply) => {
+fastify.post('/finalizePsbt', async (req, reply) => {
     try {
         const { psbtBase64, network } = req.body;
 
