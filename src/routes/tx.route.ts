@@ -8,7 +8,8 @@ import {
     buildLTCTradeTx,
     IBuildTxConfig,
     IBuildLTCITTxConfig,
-    computeMultisig
+    computeMultisig,
+    networks
 } from "../services/tx.service";
 
 export const txRoute = (fastify: FastifyInstance, opts: any, done: any) => {
