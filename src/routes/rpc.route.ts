@@ -104,6 +104,24 @@ export const rpcRoutes = (fastify: FastifyInstance, opts: any, done: any) => {
                 return;
             }
 
+            if (method === 'tl_getContractInfo') {
+                const { contractId } = request.query as { contractId: number };
+                const res = await axios.get("http://localhost:3000/tl_getContractInfo", {
+                    params: { contractId },
+                });
+                reply.send(res.data);
+                return;
+            }
+
+            if (method === 'tl_getInitMargin') {
+                const { contractId } = request.query as { contractId: number };
+                const res = await axios.get("http://localhost:3000/tl_getInitMargin", {
+                    params: { contractId },
+                });
+                reply.send(res.data);
+                return;
+            }
+
             if (method === 'importpubkey') {
                 const res = await importPubKey(fastify, params);
                 reply.send(res);
