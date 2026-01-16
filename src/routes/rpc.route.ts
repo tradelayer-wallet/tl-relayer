@@ -37,6 +37,7 @@ const allowedMethods = [
     'decoderawtransaction',
     'validateaddress',
     'addmultisigaddress',
+    'getrawmempool'
 ];
 
 export const rpcRoutes = (fastify: FastifyInstance, opts: any, done: any) => {
@@ -71,6 +72,15 @@ export const rpcRoutes = (fastify: FastifyInstance, opts: any, done: any) => {
                 const { address, propertyId } = request.query as { address: string; propertyId: number };
                 const res = await axios.get("http://localhost:3000/tl_channelBalanceForCommiter", {
                     params: { address, propertyId },
+                });
+                reply.send(res.data);
+                return;
+            }
+
+            if (method === 'tl_getChannel') {
+                const { address } = request.query as { address: string;};
+                const res = await axios.get("http://localhost:3000/tl_getChannel", {
+                    params: { address},
                 });
                 reply.send(res.data);
                 return;
