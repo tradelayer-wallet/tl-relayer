@@ -104,16 +104,6 @@ export const rpcRoutes = (fastify: FastifyInstance, opts: any, done: any) => {
                 return;
             }
 
-            
-            if (method === 'tl_tokenTradeHistoryForAddress') {
-                const { address, propertyId } = request.query as { address: string; propertyId: number };
-                const res = await axios.get("http://localhost:3000/tl_getMaxSynth", {
-                    params: { address, propertyId1, propertyId2 },
-                });
-                reply.send(res.data);
-                return;
-            }
-
             if (method === 'tl_getContractInfo') {
                 const { contractId } = request.query as { contractId: number };
                 const res = await axios.get("http://localhost:3000/tl_getContractInfo", {
