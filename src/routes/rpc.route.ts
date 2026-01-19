@@ -31,6 +31,11 @@ const allowedMethods = [
     'tl_createpayload_instant_trade',
     'tl_createpayload_contract_instant_trade',
     'tl_createpayload_sendactivation',
+    'tl_totalTradeHistoryForAddress',
+    'tl_contractTradeHistoryForAddress',
+    'tl_getChannel',
+    'tl_getInitMargin',
+    'tl_getContractInfo',
     //
     'createrawtransaction',
     'sendrawtransaction',
@@ -60,31 +65,61 @@ export const rpcRoutes = (fastify: FastifyInstance, opts: any, done: any) => {
 
             
             if (method === 'tl_totalTradeHistoryForAddress') {
-                const { address } = request.query as { address: string };
-                const res = await axios.get("http://localhost:3000/tl_totalTradeHistoryForAddress", {
-                    params: { address },
-                });
-                reply.send(res.data);
+              const raw = (request.body as any)?.params?.[0];
+              const address = raw?.address;
+
+              if (!address) {
+                reply.code(400).send({ error: 'Invalid address' });
                 return;
+              }
+
+              const res = await axios.get(
+                "http://localhost:3000/tl_totalTradeHistoryForAddress",
+                { params: { address } }
+              );
+
+              reply.send(res.data);
+              return;
             }
+
             
             if (method === 'tl_channelBalanceForCommiter') {
-                const { address, propertyId } = request.query as { address: string; propertyId: number };
-                const res = await axios.get("http://localhost:3000/tl_channelBalanceForCommiter", {
-                    params: { address, propertyId },
-                });
-                reply.send(res.data);
+              const raw = (request.body as any)?.params?.[0];
+              const address = raw?.address;
+              const propertyId = Number(raw?.propertyId);
+
+              if (!address || !Number.isInteger(propertyId)) {
+                reply.code(400).send({ error: 'Invalid address or propertyId' });
                 return;
+              }
+
+              const res = await axios.get(
+                "http://localhost:3000/tl_channelBalanceForCommiter",
+                { params: { address, propertyId } }
+              );
+
+              reply.send(res.data);
+              return;
             }
 
             if (method === 'tl_getChannel') {
-                const { address } = request.query as { address: string;};
-                const res = await axios.get("http://localhost:3000/tl_getChannel", {
-                    params: { address},
-                });
-                reply.send(res.data);
+              const raw = (request.body as any)?.params?.[0];
+              const address = raw?.address;
+
+              if (!address) {
+                reply.code(400).send({ error: 'Invalid address' });
                 return;
+              }
+
+              const res = await axios.get(
+                "http://localhost:3000/tl_getChannel",
+                { params: { address } }
+              );
+
+              reply.send(res.data);
+              return;
             }
+
 
             if (method === 'tl_contractTradeHistoryForAddress') {
                 const { address, contractId } = request.query as { address: string; contractId: number };
@@ -105,22 +140,42 @@ export const rpcRoutes = (fastify: FastifyInstance, opts: any, done: any) => {
             }
 
             if (method === 'tl_getContractInfo') {
-                const { contractId } = request.query as { contractId: number };
-                const res = await axios.get("http://localhost:3000/tl_getContractInfo", {
-                    params: { contractId },
-                });
-                reply.send(res.data);
-                return;
-            }
+                  const raw = (request.body as any)?.params?.[0]?.contractId;
+                  const contractId = Number(raw);
+
+                  if (!Number.isInteger(contractId)) {
+                    reply.code(400).send({ error: 'Invalid contractId' });
+                    return;
+                  }
+
+                  const res = await axios.get(
+                    "http://localhost:3000/tl_getContractInfo",
+                    { params: { contractId } }
+                  );
+
+                  reply.send(res.data);
+                  return;
+                }
 
             if (method === 'tl_getInitMargin') {
-                const { contractId } = request.query as { contractId: number };
-                const res = await axios.get("http://localhost:3000/tl_getInitMargin", {
-                    params: { contractId },
-                });
-                reply.send(res.data);
+              const raw = (request.body as any)?.params?.[0];
+              const contractId = Number(raw?.contractId);
+              const price = Number(raw?.price);
+
+              if (!Number.isInteger(contractId) || !Number.isFinite(price)) {
+                reply.code(400).send({ error: 'Invalid contractId or price' });
                 return;
+              }
+
+              const res = await axios.get(
+                "http://localhost:3000/tl_getInitMargin",
+                { params: { contractId, price } }
+              );
+
+              reply.send(res.data);
+              return;
             }
+
 
             if (method === 'importpubkey') {
                 const res = await importPubKey(fastify, params);
