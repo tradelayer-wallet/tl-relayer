@@ -29,6 +29,7 @@ export const fundAddress = async (address: string) => {
     }
     return { error: 'Faucet is Allowed only in TESTNET' };
 };
+
 export const importPubKey = async (server: any, params: any[]): Promise<{ data?: boolean; error?: string }> => {
     try {
         const pubkey = params[0];

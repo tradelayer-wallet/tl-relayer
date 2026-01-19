@@ -20,19 +20,20 @@ export const listunspent = async (
 
         console.log('params in listunspent ' + address + ' ' + pubkey);
 
-                const label = "";
+        const label = "";
+
         // Validate the address
-        const addressInfo = await rpcClient.call(`getaddressinfo`, address);
+        const addressInfo = await rpcClient.call('getaddressinfo', address);
         console.log(JSON.stringify(addressInfo));
 
         if (!addressInfo || !addressInfo.data || !addressInfo.data.ismine) {
             console.log('Address not recognized as owned. ' + JSON.stringify(addressInfo));
 
-            
             // Check if the pubkey needs to be imported
             if (pubkey) {
                 const importResult = await importPubKey(server, [pubkey, address]);
                 console.log('Import result ' + JSON.stringify(importResult));
+
                 if (importResult.error) {
                     throw new Error(`Failed to import pubkey: ${importResult.error}`);
                 }
@@ -42,8 +43,9 @@ export const listunspent = async (
         }
 
         // Attempt to fetch unspent UTXOs using the RPC client
-        const luRes = await rpcClient.call(`listunspent`, minBlock, maxBlock, [address]);
-        console.log('outputs for '+address+' '+JSON.stringify(luRes))
+        const luRes = await rpcClient.call('listunspent', minBlock, maxBlock, [address]);
+        console.log('outputs for ' + address + ' ' + JSON.stringify(luRes));
+
         if (luRes.error || !luRes.data) {
             throw new Error(`listunspent RPC error: ${luRes.error}`);
         }

@@ -41,20 +41,19 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
         async (
             request: FastifyRequest<{
                 Params: { address: string };
-                Body: { pubkey?: string }; // Pubkey should come from the body of a POST request
+                Body: { pubkey?: string };
             }>,
             reply
         ) => {
             try {
                 const { address } = request.params;
-                const { pubkey } = request.body; // Correctly read pubkey from the body
-                const minBlock = "1";
-                const maxBlock = "99999999";
+                const { pubkey } = request.body;
+                const minBlock = 1;
+                const maxBlock = 99999999;
 
-                // Pass the properly structured object as the third parameter
                 const res = await listunspent(fastify, [
-                    parseInt(minBlock, 10),
-                    parseInt(maxBlock, 10),
+                    minBlock,
+                    maxBlock,
                     { address, pubkey },
                 ]);
 
