@@ -6,10 +6,10 @@ import { tokenRoute } from "./token.route";
 import { txRoute } from "./tx.route";
 
 export const handleRoutes = (server: FastifyInstance) => {
-    server.register(require('@fastify/cors'), {
+    /*server.register(require('@fastify/cors'), {
 	  origin: true,
 	  credentials: true,
-	});
+	});*/
     server.register(require('fastify-axios'));
     server.register(addressRoute, { prefix: '/address' });
     server.register(txRoute, { prefix: '/tx' });
