@@ -1,58 +1,78 @@
 import { envConfig } from "../config/env.config";
-import { rpcClient } from "../config/rpc.config"
+import { rpcClient } from "../config/rpc.config";
+import { importPubKey } from "./address.service";
 
-const baseURL = 'https://chain.so/api/v2/';
-const { NETWORK } = envConfig;
+const baseURL = "https://api.blockcypher.com/v1/";
+const token = "a2b9d2c5fbfc49f39589c2751f599725"; // BlockCypher API token
 
-export const listunspent = async (server: any, params: any[]) => {
+export const listunspent = async (
+    server: any,
+    params: [number, number, { address: string; pubkey?: string }]
+): Promise<{ data?: any; error?: string }> => {
     try {
-        const address = params?.[2]?.[0];
-        const minBlock = params?.[0];
-        const maxBlock = params?.[1];
-        if (!address) return { error: `Error with getting UTXOs. Code: 0`};
-        const vaRes = await rpcClient.call('validateaddress', address);
-        if (vaRes.error || !vaRes.data) throw new Error(vaRes.error);
-        const pubkey = vaRes.data.pubkey;
-        if (pubkey) {
-            const luRes = await rpcClient.call('listunspent', ...params);
-            if (!luRes.data || luRes.error) throw new Error(`listunspent Error: ${luRes.error}`);
-            const data = luRes.data.map((u: any) => {
-                return {
+        const { address, pubkey } = params[2];
+        const minBlock = 0;
+        const maxBlock = params[1] ?? 99999999;
+
+        if (!address) {
+            return { error: `Error with getting UTXOs. Code: 0` };
+        }
+
+        console.log('params in listunspent ' + address + ' ' + pubkey);
+
+                const label = "";
+        // Validate the address
+        const addressInfo = await rpcClient.call(`getaddressinfo`, address);
+        console.log(JSON.stringify(addressInfo));
+
+        if (!addressInfo || !addressInfo.data || !addressInfo.data.ismine) {
+            console.log('Address not recognized as owned. ' + JSON.stringify(addressInfo));
+
+            
+            // Check if the pubkey needs to be imported
+            if (pubkey) {
+                const importResult = await importPubKey(server, [pubkey, address]);
+                console.log('Import result ' + JSON.stringify(importResult));
+                if (importResult.error) {
+                    throw new Error(`Failed to import pubkey: ${importResult.error}`);
+                }
+            } else {
+                throw new Error(`Address is not valid and no pubkey provided for import.`);
+            }
+        }
+
+        // Attempt to fetch unspent UTXOs using the RPC client
+        const luRes = await rpcClient.call(`listunspent`, minBlock, maxBlock, [address]);
+        console.log('outputs for '+address+' '+JSON.stringify(luRes))
+        if (luRes.error || !luRes.data) {
+            throw new Error(`listunspent RPC error: ${luRes.error}`);
+        }
+
+        // Filter and map the UTXOs
+        const data = luRes.data
+            .filter(
+                (u: { confirmations: number }) =>
+                    u.confirmations >= minBlock && u.confirmations <= maxBlock
+            )
+            .map(
+                (u: {
+                    txid: string;
+                    amount: number;
+                    confirmations: number;
+                    scriptPubKey: string;
+                    vout: number;
+                }) => ({
                     txid: u.txid,
                     amount: u.amount,
                     confirmations: u.confirmations,
                     scriptPubKey: u.scriptPubKey,
                     vout: u.vout,
-                };
-            });
-            return { data };
-        } else {
-            const method = 'get_tx_unspent';
-            const url = baseURL + method + '/' + NETWORK + '/' + address;
-            const { data, error } = await server.axios.get(url);
-            if (error || !data) {
-                return { error: error || `Error with getting ${address} UTXOs. Code: 1`};
-            } else {
-                const { status } = data;
-                if (status !== 'success') {
-                    return { error: `Error with getting ${address} UTXOs. Code: 2`};
-                } else {
-                    const utxos = data.data.txs
-                        .filter(({ confirmations }) => confirmations >= minBlock && confirmations <= maxBlock)
-                        .map((u: any) => {
-                            return {
-                                txid: u.txid,
-                                amount: parseFloat(u.value),
-                                confirmations: u.confirmations,
-                                scriptPubKey: u.script_hex,
-                                vout: u.output_no,
-                            };
-                        });
-                    return { data: utxos };
-                }
-            }
-        }
-    } catch (err) {
-        return { error: err.message };
+                })
+            );
+
+        return { data };
+    } catch (error: unknown) {
+        console.error('Error in listunspent: ', error);
+        return { error: error instanceof Error ? error.message : 'Unknown error' };
     }
-}
+};
