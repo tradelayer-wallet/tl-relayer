@@ -1,6 +1,6 @@
 import { FastifyInstance } from "fastify";
 import { rpcClient } from "../config/rpc.config"
-import { getAttestationPayload, importPubKey } from "../services/address.service";
+import { importPubKey } from "../services/address.service";
 import { listunspent } from "../services/sochain.service";
 import { ELogType, saveLog } from "../services/utils.service";
 import axios from "axios";
