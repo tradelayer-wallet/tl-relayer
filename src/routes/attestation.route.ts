@@ -43,7 +43,7 @@ export async function registerAttestationRoutes(server: FastifyInstance) {
       const result = await attestationService.checkIp(ip);
       return result;
     } catch (err: any) {
-      req.log.error(
+      console.error(
         { err },
         '[attestation] Failed to check IP reputation',
       );

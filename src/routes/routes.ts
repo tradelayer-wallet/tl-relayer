@@ -7,9 +7,7 @@ import { txRoute } from "./tx.route";
 import { registerAttestationRoutes } from "./attestation.route";
 
 export const handleRoutes = (server: FastifyInstance) => {
-
     server.register(require('fastify-axios'));
-
     server.register(addressRoute, { prefix: '/address' });
     server.register(txRoute,      { prefix: '/tx' });
     server.register(tokenRoute,   { prefix: '/token' });
