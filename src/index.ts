@@ -28,7 +28,7 @@ class FastifyServer {
     }
 
     private stop(message: string) {
-        this.server.log.error(message);
+        console.error(err);
         process.exit(1);
     }
 
