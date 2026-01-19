@@ -4,7 +4,7 @@ import { importPubKey } from "../services/address.service";
 import { listunspent } from "../services/sochain.service";
 import { ELogType, saveLog } from "../services/utils.service";
 import axios from "axios";
-
+import { Encode } from "../services/txEncoder";
 
 export const rpcRoutes = (fastify: FastifyInstance, opts: any, done: any) => {
     // Define routes explicitly
