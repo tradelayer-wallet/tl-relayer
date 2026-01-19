@@ -182,10 +182,29 @@ async function handleGenericRpc(request: any, reply: any) {
     // --- special cases ---
 
     if (method === "listunspent") {
-      const res = await listunspent(request.server, params);
+      const [minconf, maxconf, filter] = params;
+
+      if (
+        typeof minconf !== "number" ||
+        typeof maxconf !== "number" ||
+        typeof filter !== "object" ||
+        !filter?.address
+      ) {
+        reply.code(400).send({ error: "Invalid listunspent params" });
+        return;
+      }
+
+      const typedParams: [number, number, { address: string; pubkey?: string }] = [
+        minconf,
+        maxconf,
+        filter,
+      ];
+
+      const res = await listunspent(request.server, typedParams);
       reply.send(res);
       return;
     }
+
 
     if (method === "tl_getContractInfo") {
       const contractId = Number(raw?.contractId);
