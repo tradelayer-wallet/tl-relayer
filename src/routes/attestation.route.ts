@@ -28,7 +28,7 @@ function extractClientIp(req: FastifyRequest): string {
 }
 
 export async function registerAttestationRoutes(server: FastifyInstance) {
-  server.get('/attestation/ip', async (req: FastifyRequest, reply: FastifyReply) => {
+  server.get('/ip', async (req: FastifyRequest, reply: FastifyReply) => {
     const ip = extractClientIp(req);
 
     if (!ip) {
