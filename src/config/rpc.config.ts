@@ -13,5 +13,5 @@ export const rpcClient = new RpcClient(options);
 
 export const handleRpcConenction = async () => {
     const res = await rpcClient.call('tl_getinfo');
-    return res.data?.blocktime ? true : false;
+    return typeof res.data === 'number';
 }
