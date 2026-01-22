@@ -21,7 +21,7 @@ export class AttestationService {
   private readonly IPINFO_TOKEN =
     process.env.IPINFO_TOKEN || '';
 
-  private readonly bannedCountries = ['US', 'KP', 'SY', 'SD', 'RU', 'IR'];
+  private readonly bannedCountries = ['US', 'KP', 'SD', 'RU', 'IR'];
 
   /**
    * Main entrypoint: given a client IP, run reputation checks.
@@ -30,6 +30,7 @@ export class AttestationService {
   async checkIp(ipAddress: string): Promise<IpAttestationResult> {
     // 1) Try CriminalIP if key present
     if (this.CRIMINAL_IP_API_KEY) {
+      console.log('trying for crimIP')
       try {
         const primaryUrl =
           `https://api.criminalip.io/v1/asset/ip/report?ip=${ipAddress}`;
@@ -108,6 +109,7 @@ export class AttestationService {
 
     // 2) Fallback: ipinfo (with explicit IP)
     if (this.IPINFO_TOKEN) {
+      console.log('In IPINFO call')
       try {
         const fallbackUrl = `https://ipinfo.io/${ipAddress}?token=${this.IPINFO_TOKEN}`;
         const resp = await axios.get(fallbackUrl, { timeout: 8000 });
