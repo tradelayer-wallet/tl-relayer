@@ -1,6 +1,6 @@
 import Fastify, { FastifyInstance, FastifyServerOptions } from 'fastify';
 import { handleRoutes } from './routes/routes';
-import { handleRpcConenction } from './config/rpc.config';
+import { handleRpcConnection } from './config/rpc.config';
 import { envConfig } from './config/env.config';
 import { initSocketConnection } from './services/socket.service';
 

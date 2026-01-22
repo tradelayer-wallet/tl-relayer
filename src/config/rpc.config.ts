@@ -11,7 +11,7 @@ const options: IRpcClientOptions = {
 
 export const rpcClient = new RpcClient(options);
 
-export const handleRpcConenction = async () => {
-    const res = await rpcClient.call('tl_getinfo');
+export const handleRpcConnection = async () => {
+    const res = await rpcClient.call('getblockcount');
     return typeof res.data === 'number';
 }
