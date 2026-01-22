@@ -44,7 +44,7 @@ export class AttestationService {
           const isVpn = !!privacy.vpn;
           const isProxy = !!privacy.proxy;
           const fromBannedCountry = this.bannedCountries.includes(
-            String(country_code),
+            String(country),
           );
 
           const isBlocked = isVpn || fromBannedCountry;
