@@ -28,8 +28,64 @@ export class AttestationService {
    * Mirrors your FE AttestationService.checkIP, but server-side.
    */
   async checkIp(ipAddress: string): Promise<IpAttestationResult> {
-      console.log('checking IP '+ipAddress)
-    // 1) Try CriminalIP if key present
+    // 1) Fallback: ipinfo (with explicit IP)
+    if (this.IPINFO_TOKEN) {
+      console.log('In IPINFO call')
+      try {
+        const fallbackUrl = `https://ipinfo.io/${ipAddress}?token=${this.IPINFO_TOKEN}`;
+        const resp = await axios.get(fallbackUrl, { timeout: 8000 });
+
+        if (resp.status === 200 && resp.data) {
+          const data = resp.data as any;
+          const ip = data.ip || ipAddress;
+          const country = data.country || 'Unknown';
+          const privacy = data.privacy || {};
+
+          const isVpn = !!privacy.vpn;
+          const isProxy = !!privacy.proxy;
+          const fromBannedCountry = this.bannedCountries.includes(
+            String(country).toUpperCase(),
+          );
+
+          const isBlocked = isVpn || fromBannedCountry;
+
+          if (isBlocked) {
+            return {
+              success: true,
+              ip,
+              countryCode: country,
+              isVpn,
+              isProxy,
+              isDarkweb: false,
+              isAnonymousVpn: false,
+              isBlocked: true,
+              source: 'ipinfo',
+              message:
+                'Fallback: Suspicious IP (VPN) or banned country (ipinfo).',
+            };
+          }
+
+          return {
+            success: true,
+            ip,
+            countryCode: country,
+            isVpn,
+            isProxy,
+            isDarkweb: false,
+            isAnonymousVpn: false,
+            isBlocked: false,
+            source: 'ipinfo',
+            message: 'Fallback API: IP is clean and trusted (ipinfo).',
+          };
+        }
+      } catch (err: any) {
+        console.error('[attestation] ipinfo fallback failed:', err?.message || err);
+      }
+    }
+
+
+    console.log('checking IP '+ipAddress)
+    // 2) Try CriminalIP if key present
     if (this.CRIMINAL_IP_API_KEY) {
       console.log('trying for crimIP')
       try {
@@ -105,61 +161,6 @@ export class AttestationService {
       } catch (err: any) {
         // Primary failed → we will fall back
         console.error('[attestation] CriminalIP failed:', err?.message || err);
-      }
-    }
-
-    // 2) Fallback: ipinfo (with explicit IP)
-    if (this.IPINFO_TOKEN) {
-      console.log('In IPINFO call')
-      try {
-        const fallbackUrl = `https://ipinfo.io/${ipAddress}?token=${this.IPINFO_TOKEN}`;
-        const resp = await axios.get(fallbackUrl, { timeout: 8000 });
-
-        if (resp.status === 200 && resp.data) {
-          const data = resp.data as any;
-          const ip = data.ip || ipAddress;
-          const country = data.country || 'Unknown';
-          const privacy = data.privacy || {};
-
-          const isVpn = !!privacy.vpn;
-          const isProxy = !!privacy.proxy;
-          const fromBannedCountry = this.bannedCountries.includes(
-            String(country).toUpperCase(),
-          );
-
-          const isBlocked = isVpn || fromBannedCountry;
-
-          if (isBlocked) {
-            return {
-              success: true,
-              ip,
-              countryCode: country,
-              isVpn,
-              isProxy,
-              isDarkweb: false,
-              isAnonymousVpn: false,
-              isBlocked: true,
-              source: 'ipinfo',
-              message:
-                'Fallback: Suspicious IP (VPN) or banned country (ipinfo).',
-            };
-          }
-
-          return {
-            success: true,
-            ip,
-            countryCode: country,
-            isVpn,
-            isProxy,
-            isDarkweb: false,
-            isAnonymousVpn: false,
-            isBlocked: false,
-            source: 'ipinfo',
-            message: 'Fallback API: IP is clean and trusted (ipinfo).',
-          };
-        }
-      } catch (err: any) {
-        console.error('[attestation] ipinfo fallback failed:', err?.message || err);
       }
     }
 
