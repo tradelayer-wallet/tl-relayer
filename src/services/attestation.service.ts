@@ -38,13 +38,13 @@ export class AttestationService {
         if (resp.status === 200 && resp.data) {
           const data = resp.data as any;
           const ip = data.ip || ipAddress;
-          const country = data.country || 'Unknown';
+          const country = data.country_code || 'Unknown';
           const privacy = data.privacy || {};
 
           const isVpn = !!privacy.vpn;
           const isProxy = !!privacy.proxy;
           const fromBannedCountry = this.bannedCountries.includes(
-            String(country).toUpperCase(),
+            String(country_code),
           );
 
           const isBlocked = isVpn || fromBannedCountry;
