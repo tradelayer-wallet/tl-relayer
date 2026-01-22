@@ -28,6 +28,7 @@ export class AttestationService {
    * Mirrors your FE AttestationService.checkIP, but server-side.
    */
   async checkIp(ipAddress: string): Promise<IpAttestationResult> {
+      console.log('checking IP '+ipAddress)
     // 1) Try CriminalIP if key present
     if (this.CRIMINAL_IP_API_KEY) {
       console.log('trying for crimIP')
