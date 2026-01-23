@@ -75,7 +75,7 @@ export const txRoute = (fastify: FastifyInstance, opts: any, done: any) => {
     });
 
     // Compute multisig
-    fastify.post('/tx/multisig', async (req: FastifyRequest<{ Body: MultisigBody }>, reply) => {
+    fastify.post('/multisig', async (req: FastifyRequest<{ Body: MultisigBody }>, reply) => {
         try {
             const { m, pubKeys, network } = req.body;
 
