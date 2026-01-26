@@ -172,6 +172,9 @@ const allowedMethods = [
 ];
 
 async function handleGenericRpc(request: any, reply: any) {
+console.log('RPC raw body', request.body);
+console.log('RPC headers', request.headers['content-type']);
+
   try {
     const { method } = request.params as { method: string };
     const params: any[] = Array.isArray(request.body?.params)
@@ -219,6 +222,30 @@ async function handleGenericRpc(request: any, reply: any) {
       reply.send(res.data);
       return;
     }
+
+    if (method === "tl_channelBalanceForCommiter") {
+      const address = String(params?.[0] ?? "");
+      const propertyId = Number(params?.[1]);
+      console.log('inside channel commit get '+address+' '+propertyId)
+      if (!address || !Number.isInteger(propertyId)) {
+        reply
+          .code(400)
+          .send({ error: "Invalid address or propertyId" });
+        return;
+      }
+
+      const res = await axios.get(
+        "http://localhost:3000/tl_channelBalanceForCommiter",
+        {
+          params: { address, propertyId },
+        }
+      );
+      console.log('response data', res.data);
+
+      reply.send(res.data);
+      return;
+    }
+
 
     if (method === "tl_getInitMargin") {
       const contractId = Number(raw?.contractId);
