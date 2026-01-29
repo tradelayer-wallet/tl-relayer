@@ -145,7 +145,7 @@ const allowedMethods = [
   "tl_check_kyc",
   "tl_check_commits",
   "tl_listnodereward_addresses",
-  "tl_getfullposition",
+  "tl_contractPosition",
   "tl_decodetransaction",
   "tl_tokenTradeHistoryForAddress",
   "tl_contractTradeHistoryForAddress",
@@ -259,6 +259,51 @@ console.log('RPC headers', request.headers['content-type']);
       const res = await axios.get(
         "http://localhost:3000/tl_getInitMargin",
         { params: { contractId, price } }
+      );
+      reply.send(res.data);
+      return;
+    }
+
+    if (method === "tl_tokenTradeHistoryForAddress") {
+      const propertyId1 = params?.[0];
+      const propertyId2 = params?.[1];
+      const address = String(params?.[2] ?? "");
+      if (propertyId1 == null || propertyId2 == null || !address) {
+        reply.code(400).send({ error: "Invalid propertyId1, propertyId2, or address" });
+        return;
+      }
+      const res = await axios.get(
+        "http://localhost:3000/tl_tokenTradeHistoryForAddress",
+        { params: { propertyId1, propertyId2, address } }
+      );
+      reply.send(res.data);
+      return;
+    }
+
+    if (method === "tl_contractTradeHistoryForAddress") {
+      const contractId = Number(params?.[0]);
+      const address = String(params?.[2] ?? params?.[1] ?? "");
+      if (!Number.isFinite(contractId) || !address) {
+        reply.code(400).send({ error: "Invalid contractId or address" });
+        return;
+      }
+      const res = await axios.get(
+        "http://localhost:3000/tl_contractTradeHistoryForAddress",
+        { params: { contractId, address } }
+      );
+      reply.send(res.data);
+      return;
+    }
+
+    if (method === "tl_totalTradeHistoryForAddress") {
+      const address = String(params?.[0] ?? "");
+      if (!address) {
+        reply.code(400).send({ error: "Invalid address" });
+        return;
+      }
+      const res = await axios.get(
+        "http://localhost:3000/tl_totalTradeHistoryForAddress",
+        { params: { address } }
       );
       reply.send(res.data);
       return;
