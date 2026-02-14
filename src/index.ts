@@ -2,7 +2,7 @@ import Fastify, { FastifyInstance, FastifyServerOptions } from 'fastify';
 import { handleRoutes } from './routes/routes';
 import { handleRpcConnection } from './config/rpc.config';
 import { envConfig } from './config/env.config';
-import { initSocketConnection } from './services/socket.service';
+import { WsRelayService } from './services/ws-relay.service';
 
 class FastifyServer {
     private _server: FastifyInstance;
@@ -21,7 +21,7 @@ class FastifyServer {
     start() {
         this.handleRoutes();
         this.handleRpcConnection();
-        // this.handleSockets()
+        this.handleSockets()
         if(!this.port){this.port=8000}
         this.server.listen(this.port, '0.0.0.0')
             .then(() => console.log(`Server Started On Port ${this.port}`))
@@ -34,7 +34,7 @@ class FastifyServer {
     }
 
     private handleSockets() {
-        initSocketConnection(this.server)
+        new WsRelayService(this.server);
     }
 
     private handleRoutes() {
@@ -42,7 +42,7 @@ class FastifyServer {
     }
 
     private async handleRpcConnection() {
-        const connected = await handleRpcConenction();
+        const connected = await handleRpcConnection();
         const message = connected ? `RPC Connected` : `ERROR: RPC connection fails`;
         console.log(message);
     }
