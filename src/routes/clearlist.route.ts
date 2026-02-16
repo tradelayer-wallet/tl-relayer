@@ -5,6 +5,7 @@ import * as bitcoin from "bitcoinjs-lib";
 type Body = {
   groupId?: string;
   listId?: number;
+  clearlistId?: number;
   address?: string;
   pubkeyHex?: string;
   optIn?: boolean;
@@ -25,6 +26,46 @@ function parseGroupMap(): Record<string, number> {
   } catch {
     return {};
   }
+}
+
+function parseNonNegativeInt(v: any): number | null {
+  if (typeof v === "number") {
+    if (Number.isInteger(v) && v >= 0) return v;
+    return null;
+  }
+  if (typeof v === "string") {
+    const s = v.trim();
+    if (!s) return null;
+    if (!/^\d+$/.test(s)) return null;
+    const n = Number(s);
+    if (Number.isInteger(n) && n >= 0) return n;
+  }
+  return null;
+}
+
+function resolveClearlistId(body: Body, groupMap: Record<string, number>): {
+  clearlistId: number | null;
+  groupId?: string;
+  reason?: "invalid_clearlist_id" | "group_unmapped";
+} {
+  const explicit = parseNonNegativeInt((body as any).clearlistId);
+  if (explicit !== null) return { clearlistId: explicit };
+
+  const listId = parseNonNegativeInt((body as any).listId);
+  if (listId !== null) return { clearlistId: listId };
+
+  const groupIdRaw = body.groupId != null ? String(body.groupId) : "";
+  const groupId = groupIdRaw.trim();
+  if (!groupId) return { clearlistId: null, reason: "invalid_clearlist_id" };
+
+  if (Object.prototype.hasOwnProperty.call(groupMap, groupId)) {
+    return { clearlistId: groupMap[groupId], groupId };
+  }
+
+  const numericGroup = parseNonNegativeInt(groupId);
+  if (numericGroup !== null) return { clearlistId: numericGroup, groupId };
+
+  return { clearlistId: null, groupId, reason: "group_unmapped" };
 }
 
 function litecoinNetworkFromEnv(): bitcoin.networks.Network {
@@ -61,6 +102,12 @@ function isOptedIn(req: FastifyRequest, body: Body): boolean {
 }
 
 export async function registerClearlistRoutes(server: FastifyInstance) {
+  server.get("/map", async () => {
+    const enabled = String(process.env.CLEARLIST_CHECK_ENABLE || "") === "1";
+    const map = parseGroupMap();
+    return { enabled, groupMap: map };
+  });
+
   server.get(
     "/admin/:id",
     async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
@@ -109,16 +156,18 @@ export async function registerClearlistRoutes(server: FastifyInstance) {
       }
 
       const groupMap = parseGroupMap();
-      const groupId = body.groupId != null ? String(body.groupId) : "";
-      const listId =
-        Number.isInteger(body.listId) ? Number(body.listId) :
-        groupId && groupMap[groupId] != null ? groupMap[groupId] :
-        groupId && /^\d+$/.test(groupId) ? parseInt(groupId, 10) :
-        null;
+      const resolved = resolveClearlistId(body, groupMap);
+      const listId = resolved.clearlistId;
+      const groupId = resolved.groupId;
 
       if (listId == null || !Number.isInteger(listId) || listId < 0) {
         reply.code(400);
-        return { allowed: false, enabled: true, reason: "invalid_list_id" };
+        return {
+          allowed: false,
+          enabled: true,
+          reason: resolved.reason || "invalid_clearlist_id",
+          groupId: groupId || undefined,
+        };
       }
 
       const address =
@@ -146,6 +195,7 @@ export async function registerClearlistRoutes(server: FastifyInstance) {
       return {
         allowed: !!allowed,
         enabled: true,
+        clearlistId: listId,
         listId,
         groupId: groupId || undefined,
         address,
