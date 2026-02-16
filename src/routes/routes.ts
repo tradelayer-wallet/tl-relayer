@@ -5,6 +5,7 @@ import { rpcRoutes } from "./rpc.route";
 import { tokenRoute } from "./token.route";
 import { txRoute } from "./tx.route";
 import { registerAttestationRoutes } from "./attestation.route";
+import { registerClearlistRoutes } from "./clearlist.route";
 
 export const handleRoutes = (server: FastifyInstance) => {
     server.register(require('fastify-axios'));
@@ -14,4 +15,5 @@ export const handleRoutes = (server: FastifyInstance) => {
     server.register(chainRoute,   { prefix: '/chain' });
     server.register(rpcRoutes,    { prefix: '/rpc' });
     server.register(registerAttestationRoutes, { prefix: '/attestation' });
+    server.register(registerClearlistRoutes, { prefix: '/clearlist' });
 };
