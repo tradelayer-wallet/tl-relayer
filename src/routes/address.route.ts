@@ -1,5 +1,5 @@
 import { FastifyInstance, FastifyRequest } from "fastify";
-import { fundAddress, getAddressBalance, validateAddress } from "../services/address.service";
+import { fundAddress, getAddressBalance, importWatchOnlyAccounts, validateAddress } from "../services/address.service";
 import { listunspent } from "../services/sochain.service"; // Import the new function
 
 export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => {
@@ -35,6 +35,39 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
             reply.status(500).send({ error: errorMessage });
         }
     });
+
+    fastify.post(
+        '/sync-watchonly',
+        async (
+            request: FastifyRequest<{
+                Body: { accounts?: Array<{ address?: string; pubkey?: string }> };
+            }>,
+            reply
+        ) => {
+            try {
+                const accounts = Array.isArray(request.body?.accounts)
+                    ? request.body.accounts
+                    : [];
+                const res = await importWatchOnlyAccounts(
+                    fastify,
+                    accounts.map((account) => ({
+                        address: String(account?.address || '').trim(),
+                        pubkey: String(account?.pubkey || '').trim(),
+                    }))
+                );
+
+                if (res.error) {
+                    reply.status(400).send({ error: res.error });
+                } else {
+                    reply.send(res.data);
+                }
+            } catch (error: unknown) {
+                const errorMessage =
+                    error instanceof Error ? error.message : "An unexpected error occurred";
+                reply.status(500).send({ error: errorMessage });
+            }
+        }
+    );
 
     fastify.post(
         '/utxo/:address',

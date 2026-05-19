@@ -13,6 +13,13 @@ export const envConfig: {
     RPC_PASS: string;
     RPC_HOST: string;
     RPC_PORT: number;
+    COLLATOR_URL: string;
+    COLLATOR_RPC_SERVICE: string;
+    COLLATOR_RPC_NETWORK: string;
+    WATCH_RPC_USER: string;
+    WATCH_RPC_PASS: string;
+    WATCH_RPC_HOST: string;
+    WATCH_RPC_PORT: number;
     VPN_KEYS: {
         VPN_CRIMINALIP: string;
         VPN_IPHUB: string;
@@ -28,6 +35,13 @@ export const envConfig: {
     RPC_PASS: process.env.RPC_PASS,
     RPC_HOST: process.env.RPC_HOST,
     RPC_PORT: parseInt(process.env.RPC_PORT),
+    COLLATOR_URL: process.env.TL_COLLATOR_URL || process.env.COLLATOR_URL || '',
+    COLLATOR_RPC_SERVICE: process.env.TL_COLLATOR_RPC_SERVICE || process.env.COLLATOR_RPC_SERVICE || 'tradelayer.rpc',
+    COLLATOR_RPC_NETWORK: process.env.TL_COLLATOR_RPC_NETWORK || process.env.COLLATOR_RPC_NETWORK || process.env.NETWORK || '',
+    WATCH_RPC_USER: process.env.WATCH_RPC_USER || process.env.RPC_USER,
+    WATCH_RPC_PASS: process.env.WATCH_RPC_PASS || process.env.RPC_PASS,
+    WATCH_RPC_HOST: process.env.WATCH_RPC_HOST || process.env.RPC_HOST,
+    WATCH_RPC_PORT: parseInt(process.env.WATCH_RPC_PORT || process.env.RPC_PORT),
     VPN_KEYS: {
         VPN_CRIMINALIP: process.env.VPN_CRIMINALIP,
         VPN_IPHUB: process.env.VPN_IPHUB,

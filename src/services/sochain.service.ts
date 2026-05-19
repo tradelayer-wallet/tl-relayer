@@ -1,6 +1,5 @@
 import { envConfig } from "../config/env.config";
-import { rpcClient } from "../config/rpc.config";
-import { importPubKey } from "./address.service";
+import { callRpc, importPubKey } from "./address.service";
 
 const baseURL = "https://api.blockcypher.com/v1/";
 const token = "a2b9d2c5fbfc49f39589c2751f599725"; // BlockCypher API token
@@ -23,7 +22,7 @@ export const listunspent = async (
         const label = "";
 
         // Validate the address
-        const addressInfo = await rpcClient.call('getaddressinfo', address);
+        const addressInfo = await callRpc('getaddressinfo', address);
         console.log(JSON.stringify(addressInfo));
 
         if (!addressInfo || !addressInfo.data || !addressInfo.data.ismine) {
@@ -43,7 +42,7 @@ export const listunspent = async (
         }
 
         // Attempt to fetch unspent UTXOs using the RPC client
-        const luRes = await rpcClient.call('listunspent', minBlock, maxBlock, [address]);
+        const luRes = await callRpc('listunspent', minBlock, maxBlock, [address]);
         console.log('outputs for ' + address + ' ' + JSON.stringify(luRes));
 
         if (luRes.error || !luRes.data) {
