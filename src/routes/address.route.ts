@@ -1,6 +1,7 @@
 import { FastifyInstance, FastifyRequest } from "fastify";
 import { fundAddress, getAddressBalance, importWatchOnlyAccounts, validateAddress } from "../services/address.service";
 import { listunspent } from "../services/sochain.service"; // Import the new function
+import { getWatchOnlyRegistrySummary, listWatchOnlyEntries, recordWatchOnlySnapshot } from "../services/watchonly-registry.service";
 
 export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => {
     fastify.get('/validate/:address', async (request: FastifyRequest<{ Params: { address: string } }>, reply) => {
@@ -61,6 +62,96 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
                 } else {
                     reply.send(res.data);
                 }
+            } catch (error: unknown) {
+                const errorMessage =
+                    error instanceof Error ? error.message : "An unexpected error occurred";
+                reply.status(500).send({ error: errorMessage });
+            }
+        }
+    );
+
+    fastify.get(
+        '/watchonly',
+        async (
+            request: FastifyRequest<{
+                Querystring: { network?: string; address?: string };
+            }>,
+            reply
+        ) => {
+            try {
+                const { network, address } = request.query || {};
+                const entries = listWatchOnlyEntries({ network, address });
+                reply.send({
+                    ok: true,
+                    summary: getWatchOnlyRegistrySummary(),
+                    entries,
+                });
+            } catch (error: unknown) {
+                const errorMessage =
+                    error instanceof Error ? error.message : "An unexpected error occurred";
+                reply.status(500).send({ error: errorMessage });
+            }
+        }
+    );
+
+    fastify.get(
+        '/watchonly/:address',
+        async (
+            request: FastifyRequest<{
+                Params: { address: string };
+                Querystring: { network?: string };
+            }>,
+            reply
+        ) => {
+            try {
+                const { address } = request.params;
+                const { network } = request.query || {};
+                const entries = listWatchOnlyEntries({ network, address });
+                reply.send({
+                    ok: true,
+                    entries,
+                    entry: entries[0] || null,
+                });
+            } catch (error: unknown) {
+                const errorMessage =
+                    error instanceof Error ? error.message : "An unexpected error occurred";
+                reply.status(500).send({ error: errorMessage });
+            }
+        }
+    );
+
+    fastify.post(
+        '/watchonly/snapshot',
+        async (
+            request: FastifyRequest<{
+                Body: {
+                    network?: string;
+                    address?: string;
+                    pubkey?: string;
+                    utxos?: any[];
+                };
+            }>,
+            reply
+        ) => {
+            try {
+                const body = request.body || {};
+                if (!body.address) {
+                    reply.status(400).send({ error: 'Missing address' });
+                    return;
+                }
+                const snapshot = recordWatchOnlySnapshot({
+                    network: body.network,
+                    address: body.address,
+                    pubkey: body.pubkey,
+                    utxos: Array.isArray(body.utxos) ? body.utxos : [],
+                });
+
+                if (!snapshot) {
+                    reply.status(400).send({ error: 'Missing pubkey or no snapshot data' });
+                    return;
+                }
+
+                reply.send({ ok: true, entry: snapshot });
             } catch (error: unknown) {
                 const errorMessage =
                     error instanceof Error ? error.message : "An unexpected error occurred";

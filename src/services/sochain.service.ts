@@ -1,5 +1,6 @@
 import { envConfig } from "../config/env.config";
 import { callRpc, importPubKey } from "./address.service";
+import { recordWatchOnlySnapshot, resolveWatchOnlyPubkey, upsertWatchOnlyEntry } from "./watchonly-registry.service";
 
 const baseURL = "https://api.blockcypher.com/v1/";
 const token = "a2b9d2c5fbfc49f39589c2751f599725"; // BlockCypher API token
@@ -12,12 +13,14 @@ export const listunspent = async (
         const { address, pubkey } = params[2];
         const minBlock = 0;
         const maxBlock = params[1] ?? 99999999;
+        const network = envConfig.NETWORK || '';
+        const effectivePubkey = pubkey || resolveWatchOnlyPubkey({ network, address }) || '';
 
         if (!address) {
             return { error: `Error with getting UTXOs. Code: 0` };
         }
 
-        console.log('params in listunspent ' + address + ' ' + pubkey);
+        console.log('params in listunspent ' + address + ' ' + effectivePubkey);
 
         const label = "";
 
@@ -29,8 +32,15 @@ export const listunspent = async (
             console.log('Address not recognized as owned. ' + JSON.stringify(addressInfo));
 
             // Check if the pubkey needs to be imported
-            if (pubkey) {
-                const importResult = await importPubKey(server, [pubkey, address]);
+            if (effectivePubkey) {
+                upsertWatchOnlyEntry({
+                    network,
+                    address,
+                    pubkey: effectivePubkey,
+                    imported: false,
+                });
+
+                const importResult = await importPubKey(server, [effectivePubkey, address]);
                 console.log('Import result ' + JSON.stringify(importResult));
 
                 if (importResult.error) {
@@ -70,6 +80,13 @@ export const listunspent = async (
                     vout: u.vout,
                 })
             );
+
+        recordWatchOnlySnapshot({
+            network,
+            address,
+            pubkey: effectivePubkey,
+            utxos: data,
+        });
 
         return { data };
     } catch (error: unknown) {

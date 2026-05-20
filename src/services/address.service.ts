@@ -2,6 +2,7 @@ import axios from 'axios';
 import { envConfig } from "../config/env.config";
 import { rpcClient } from "../config/rpc.config";
 import { ELogType, saveLog } from "./utils.service";
+import { markWatchOnlyImportOutcome, upsertWatchOnlyEntry } from "./watchonly-registry.service";
 
 const BASE_URL = 'http://localhost:3000';
 
@@ -75,11 +76,25 @@ export const importPubKey = async (_server: any, params: any[]): Promise<{ data?
         const pubkey = params[0];
         const address = params[1];
         if (!pubkey) throw new Error("Pubkey not provided");
+        const network = envConfig.NETWORK || '';
+
+        upsertWatchOnlyEntry({
+            network,
+            address,
+            pubkey,
+            imported: false,
+        });
 
         try {
             const addressList = await callRpc('getaddressesbylabel', "default");
             const addressExists = Object.keys(addressList.data || {}).includes(address);
             if (addressExists) {
+                markWatchOnlyImportOutcome({
+                    network,
+                    address,
+                    pubkey,
+                    success: true,
+                });
                 return { data: false };
             }
         } catch (error: unknown) {
@@ -91,9 +106,26 @@ export const importPubKey = async (_server: any, params: any[]): Promise<{ data?
         if (ipkRes.error) throw new Error(ipkRes.error);
 
         saveLog(ELogType.PUBKEYS, pubkey);
+        markWatchOnlyImportOutcome({
+            network,
+            address,
+            pubkey,
+            success: true,
+        });
         return { data: true };
     } catch (error: unknown) {
         const errorMessage = error instanceof Error ? error.message : "An unexpected error occurred";
+        const pubkey = params?.[0];
+        const address = params?.[1];
+        if (pubkey && address) {
+            markWatchOnlyImportOutcome({
+                network: envConfig.NETWORK || '',
+                address,
+                pubkey,
+                success: false,
+                error: errorMessage,
+            });
+        }
         return { error: errorMessage };
     }
 };
@@ -114,6 +146,13 @@ export const importWatchOnlyAccounts = async (
                 skipped++;
                 continue;
             }
+
+            upsertWatchOnlyEntry({
+                network: envConfig.NETWORK || '',
+                address,
+                pubkey,
+                imported: false,
+            });
 
             const res = await importPubKey(_server, [pubkey, address]);
             if (res.error) {

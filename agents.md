@@ -19,6 +19,21 @@ The server agent should keep the following behavior intact:
   - Body may include `{ pubkey }`.
 - `GET /address/balance/:address`
 - `GET /address/validate/:address`
+- `GET /address/watchonly`
+  - Returns the canonical watch-only registry.
+- `GET /address/watchonly/:address`
+  - Returns the registry entry for one address.
+- `POST /address/watchonly/snapshot`
+  - Body: `{ network?, address, pubkey?, utxos: [...] }`
+  - Purpose: store the latest UTXO-set snapshot for an imported watch-only address.
+
+## Registry rules
+
+- `tl-relayer` is the source of truth for watch-only keys.
+- Every imported `{ address, pubkey }` pair should be upserted into the registry.
+- The relayer should fall back to the registry pubkey if a later UTXO poll omits one.
+- UTXO polling should record a snapshot hash so redundant imports and drift can be detected.
+- The registry is persisted to `TL_RELAYER_STATE_DIR` / `RELAYER_STATE_DIR` or `state/watchonly-registry.json` by default.
 
 ## Collator-backed mode
 
@@ -55,9 +70,9 @@ When `TL_COLLATOR_URL` is not set:
 - Do not remove the direct-RPC fallback, because some deployments still depend on it.
 - Keep the watch-only import idempotent. Repeated browser balance polls should not spam imports.
 - The server agent should treat `rpcProviders` on `tl-collator` as the source of truth for routed RPC availability.
+- The server agent should use `/address/watchonly` as the canonical registry view when reconciling wallet balances.
 
 ## Verification
 
 - `npx webpack --mode=development` should build successfully in this repo.
 - If a package script fails because of `NODE_OPTIONS=--openssl-legacy-provider`, run the build with `NODE_OPTIONS` cleared and use the local webpack binary directly.
-
