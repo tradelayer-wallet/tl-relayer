@@ -171,7 +171,8 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
         ) => {
             try {
                 const { address } = request.params;
-                const { pubkey } = request.body;
+                const body = request.body || {};
+                const pubkey = body.pubkey;
                 const minBlock = 1;
                 const maxBlock = 99999999;
 

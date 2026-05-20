@@ -1,6 +1,6 @@
 import { envConfig } from "../config/env.config";
-import { callRpc, importPubKey } from "./address.service";
-import { recordWatchOnlySnapshot, resolveWatchOnlyPubkey, upsertWatchOnlyEntry } from "./watchonly-registry.service";
+import { callRpc, getWatchOnlyRegistryPubkey, importPubKey } from "./address.service";
+import { recordWatchOnlySnapshot, upsertWatchOnlyEntry } from "./watchonly-registry.service";
 
 const baseURL = "https://api.blockcypher.com/v1/";
 const token = "a2b9d2c5fbfc49f39589c2751f599725"; // BlockCypher API token
@@ -14,7 +14,8 @@ export const listunspent = async (
         const minBlock = 0;
         const maxBlock = params[1] ?? 99999999;
         const network = envConfig.NETWORK || '';
-        const effectivePubkey = pubkey || resolveWatchOnlyPubkey({ network, address }) || '';
+        const registryPubkey = await getWatchOnlyRegistryPubkey(address);
+        const effectivePubkey = pubkey || registryPubkey || '';
 
         if (!address) {
             return { error: `Error with getting UTXOs. Code: 0` };

@@ -1,322 +1,602 @@
-import { createHash } from 'crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
-import { dirname, join } from 'path';
+import axios from 'axios';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+
 import { envConfig } from '../config/env.config';
+import { rpcClient } from '../config/rpc.config';
+import { ELogType, saveLog } from './utils.service';
 
-export type WatchOnlyRegistrySnapshotUtxo = {
-  txid: string;
-  vout: number;
-  amount: number;
-  confirmations: number;
-  scriptPubKey?: string;
-};
-
-export type WatchOnlyRegistryEntry = {
-  network: string;
-  address: string;
-  pubkey: string;
-  createdAt: number;
-  lastSeenAt: number;
-  lastImportedAt: number | null;
-  lastImportAttemptAt: number | null;
-  lastImportError: string | null;
-  importCount: number;
-  lastUtxoSnapshot: {
-    hash: string;
-    count: number;
-    totalAmount: number;
-    updatedAt: number;
-    utxos: WatchOnlyRegistrySnapshotUtxo[];
-  } | null;
-};
-
-type WatchOnlyRegistryFile = {
-  version: number;
-  updatedAt: number;
-  entries: WatchOnlyRegistryEntry[];
-};
-
-const REGISTRY_VERSION = 1;
-
-function normalize(value: string): string {
-  return String(value || '').trim();
+export interface WatchOnlyAccount {
+    address: string;
+    pubkey: string;
 }
 
-function normalizeNetwork(network?: string): string {
-  return normalize(network || envConfig.NETWORK || 'unknown').toLowerCase();
+export interface WatchOnlyRegistryEntry extends WatchOnlyAccount {
+    source: string;
+    firstSeenAt: number;
+    lastSeenAt: number;
+    lastImportedAt: number | null;
+    importCount: number;
+    lastError?: string;
+    lastUtxoSnapshot?: {
+        hash: string;
+        count: number;
+        totalAmount: number;
+        updatedAt: number;
+        utxos: Array<{
+            txid: string;
+            vout: number;
+            amount: number;
+            confirmations: number;
+            scriptPubKey?: string;
+        }>;
+    };
 }
 
-function getStateDir(): string {
-  return normalize(process.env.TL_RELAYER_STATE_DIR || process.env.RELAYER_STATE_DIR || join(process.cwd(), 'state'));
+export interface WatchOnlyRegistrySnapshot {
+    path: string;
+    generatedAt: number;
+    entries: WatchOnlyRegistryEntry[];
+}
+
+export interface WatchOnlyImportResult {
+    address: string;
+    pubkey: string;
+    imported: boolean;
+    refreshed: boolean;
+    skipped: boolean;
+    updated: boolean;
+    error?: string;
+}
+
+export interface WatchOnlySyncSummary {
+    imported: number;
+    refreshed: number;
+    skipped: number;
+    updated: number;
+    failed: number;
+    results: WatchOnlyImportResult[];
+    snapshot: WatchOnlyRegistrySnapshot;
+}
+
+const DEFAULT_REGISTRY_PATH = 'state/watchonly-registry.json';
+const DEFAULT_RECONCILE_INTERVAL_MS = 5 * 60 * 1000;
+
+let registryCache: Map<string, WatchOnlyRegistryEntry> | null = null;
+let registryLoadPromise: Promise<Map<string, WatchOnlyRegistryEntry>> | null = null;
+let reconcileInFlight = false;
+
+function trimSlash(value: string): string {
+    return String(value || '').replace(/\/+$/, '');
+}
+
+function useCollatorRpc(): boolean {
+    return !!String(envConfig.COLLATOR_URL || '').trim();
+}
+
+async function callRpc(method: string, ...params: any[]): Promise<{ data?: any; error?: string }> {
+    if (!useCollatorRpc()) {
+        return rpcClient.call(method, ...params);
+    }
+
+    try {
+        const url = trimSlash(envConfig.COLLATOR_URL);
+        const res = await axios.post(
+            `${url}/rpc/route`,
+            {
+                service: envConfig.COLLATOR_RPC_SERVICE,
+                network: envConfig.COLLATOR_RPC_NETWORK,
+                method,
+                params,
+            },
+            { timeout: 15000 },
+        );
+
+        const payload: any = res.data || {};
+        if (payload.ok === false) {
+            return { error: payload?.error?.message || payload?.error || 'Collator RPC failed' };
+        }
+
+        return {
+            data: payload?.result ?? payload?.data ?? payload,
+        };
+    } catch (error: any) {
+        const payload = error?.response?.data;
+        const message =
+            payload?.error?.message ||
+            payload?.error ||
+            error?.message ||
+            'Collator RPC failed';
+        return { error: message };
+    }
 }
 
 function getRegistryPath(): string {
-  return normalize(process.env.TL_WATCHONLY_REGISTRY_PATH || join(getStateDir(), 'watchonly-registry.json'));
+    return String(envConfig.WATCHONLY_REGISTRY_PATH || DEFAULT_REGISTRY_PATH).trim() || DEFAULT_REGISTRY_PATH;
 }
 
-function ensureRegistryDir() {
-  const registryPath = getRegistryPath();
-  const registryDir = dirname(registryPath);
-  if (!existsSync(registryDir)) {
-    mkdirSync(registryDir, { recursive: true });
-  }
+function normalize(value: string): string {
+    return String(value || '').trim();
 }
 
-function emptyRegistry(): WatchOnlyRegistryFile {
-  return {
-    version: REGISTRY_VERSION,
-    updatedAt: Date.now(),
-    entries: [],
-  };
+function normalizeAccount(account: Partial<WatchOnlyAccount> | null | undefined): WatchOnlyAccount | null {
+    const address = normalize(String(account?.address || ''));
+    const pubkey = normalize(String(account?.pubkey || ''));
+    if (!address || !pubkey) return null;
+    return { address, pubkey };
 }
 
-function readRegistry(): WatchOnlyRegistryFile {
-  try {
-    const registryPath = getRegistryPath();
-    if (!existsSync(registryPath)) {
-      return emptyRegistry();
-    }
-    const raw = JSON.parse(readFileSync(registryPath, 'utf8'));
-    const entries = Array.isArray(raw?.entries) ? raw.entries : [];
+function toEntry(raw: any): WatchOnlyRegistryEntry | null {
+    const account = normalizeAccount(raw);
+    if (!account) return null;
+
+    const now = Date.now();
+    const firstSeenAt = Number(raw?.firstSeenAt);
+    const lastSeenAt = Number(raw?.lastSeenAt);
+    const lastImportedAt = Number(raw?.lastImportedAt);
+    const importCount = Number(raw?.importCount);
+
+    const lastUtxoSnapshot = raw?.lastUtxoSnapshot && typeof raw.lastUtxoSnapshot === 'object'
+        ? {
+            hash: String(raw.lastUtxoSnapshot.hash || ''),
+            count: Number(raw.lastUtxoSnapshot.count || 0),
+            totalAmount: Number(raw.lastUtxoSnapshot.totalAmount || 0),
+            updatedAt: Number(raw.lastUtxoSnapshot.updatedAt || now),
+            utxos: Array.isArray(raw.lastUtxoSnapshot.utxos) ? raw.lastUtxoSnapshot.utxos : [],
+        }
+        : undefined;
+
     return {
-      version: Number(raw?.version || REGISTRY_VERSION),
-      updatedAt: Number(raw?.updatedAt || Date.now()),
-      entries: entries
-        .map((entry: any) => normalizeEntry(entry))
-        .filter(Boolean) as WatchOnlyRegistryEntry[],
+        address: account.address,
+        pubkey: account.pubkey,
+        source: normalize(String(raw?.source || 'sync-watchonly')) || 'sync-watchonly',
+        firstSeenAt: Number.isFinite(firstSeenAt) && firstSeenAt > 0 ? firstSeenAt : now,
+        lastSeenAt: Number.isFinite(lastSeenAt) && lastSeenAt > 0 ? lastSeenAt : now,
+        lastImportedAt: Number.isFinite(lastImportedAt) && lastImportedAt > 0 ? lastImportedAt : null,
+        importCount: Number.isFinite(importCount) && importCount >= 0 ? importCount : 0,
+        ...(typeof raw?.lastError === 'string' && raw.lastError.trim() ? { lastError: raw.lastError.trim() } : {}),
+        ...(lastUtxoSnapshot ? { lastUtxoSnapshot } : {}),
     };
-  } catch {
-    return emptyRegistry();
-  }
 }
 
-function writeRegistry(registry: WatchOnlyRegistryFile) {
-  ensureRegistryDir();
-  writeFileSync(getRegistryPath(), `${JSON.stringify(registry, null, 2)}\n`, 'utf8');
+function snapshotFromEntries(entries: Map<string, WatchOnlyRegistryEntry>): WatchOnlyRegistrySnapshot {
+    return {
+        path: getRegistryPath(),
+        generatedAt: Date.now(),
+        entries: Array.from(entries.values()).sort((a, b) => a.address.localeCompare(b.address)),
+    };
 }
 
-function normalizeEntry(entry: any): WatchOnlyRegistryEntry | null {
-  const network = normalizeNetwork(entry?.network);
-  const address = normalize(entry?.address);
-  const pubkey = normalize(entry?.pubkey);
-  if (!address || !pubkey) {
-    return null;
-  }
+async function loadRegistryFromDisk(): Promise<Map<string, WatchOnlyRegistryEntry>> {
+    const registryPath = getRegistryPath();
+    try {
+        if (!fs.existsSync(registryPath)) {
+            return new Map();
+        }
 
-  const snapshot = entry?.lastUtxoSnapshot;
-  const lastUtxoSnapshot = snapshot && typeof snapshot === 'object'
-    ? {
-        hash: normalize(snapshot.hash),
-        count: Number(snapshot.count || 0),
-        totalAmount: Number(snapshot.totalAmount || 0),
-        updatedAt: Number(snapshot.updatedAt || Date.now()),
-        utxos: Array.isArray(snapshot.utxos)
-          ? snapshot.utxos.map(normalizeUtxo).filter(Boolean) as WatchOnlyRegistrySnapshotUtxo[]
-          : [],
-      }
-    : null;
+        const raw = await fs.promises.readFile(registryPath, 'utf8');
+        if (!raw.trim()) {
+            return new Map();
+        }
 
-  return {
-    network,
-    address,
-    pubkey,
-    createdAt: Number(entry?.createdAt || Date.now()),
-    lastSeenAt: Number(entry?.lastSeenAt || Date.now()),
-    lastImportedAt: entry?.lastImportedAt == null ? null : Number(entry.lastImportedAt),
-    lastImportAttemptAt: entry?.lastImportAttemptAt == null ? null : Number(entry.lastImportAttemptAt),
-    lastImportError: entry?.lastImportError == null ? null : String(entry.lastImportError),
-    importCount: Number(entry?.importCount || 0),
-    lastUtxoSnapshot,
-  };
+        const parsed = JSON.parse(raw);
+        const sourceEntries = Array.isArray(parsed)
+            ? parsed
+            : Array.isArray(parsed?.entries)
+                ? parsed.entries
+                : Array.isArray(parsed?.accounts)
+                    ? parsed.accounts
+                    : [];
+
+        const entries = new Map<string, WatchOnlyRegistryEntry>();
+        for (const item of sourceEntries) {
+            const entry = toEntry(item);
+            if (!entry) continue;
+            entries.set(entry.address, entry);
+        }
+        return entries;
+    } catch (error) {
+        console.warn(`[watchonly-registry] Failed to load ${registryPath}:`, (error as Error)?.message || error);
+        return new Map();
+    }
 }
 
-function normalizeUtxo(utxo: any): WatchOnlyRegistrySnapshotUtxo | null {
-  if (!utxo || typeof utxo !== 'object') {
-    return null;
-  }
-  const txid = normalize(utxo.txid);
-  const vout = Number(utxo.vout);
-  if (!txid || !Number.isInteger(vout)) {
-    return null;
-  }
-  return {
-    txid,
-    vout,
-    amount: Number(utxo.amount || 0),
-    confirmations: Number(utxo.confirmations || 0),
-    scriptPubKey: utxo.scriptPubKey == null ? undefined : String(utxo.scriptPubKey),
-  };
+async function getRegistryEntries(): Promise<Map<string, WatchOnlyRegistryEntry>> {
+    if (registryCache) return registryCache;
+    if (!registryLoadPromise) {
+        registryLoadPromise = loadRegistryFromDisk().then((entries) => {
+            registryCache = entries;
+            registryLoadPromise = null;
+            return entries;
+        }).catch((error) => {
+            registryLoadPromise = null;
+            throw error;
+        });
+    }
+    return registryLoadPromise;
 }
 
-function entryKey(network: string, address: string): string {
-  return `${normalizeNetwork(network)}::${normalize(address).toLowerCase()}`;
+async function persistRegistryEntries(entries: Map<string, WatchOnlyRegistryEntry>): Promise<void> {
+    const registryPath = getRegistryPath();
+    const snapshot = snapshotFromEntries(entries);
+    const dir = path.dirname(registryPath);
+    await fs.promises.mkdir(dir, { recursive: true });
+
+    const tmpPath = `${registryPath}.tmp`;
+    await fs.promises.writeFile(tmpPath, `${JSON.stringify(snapshot, null, 2)}\n`, 'utf8');
+    await fs.promises.rename(tmpPath, registryPath);
+    registryCache = entries;
 }
 
-function findEntryIndex(registry: WatchOnlyRegistryFile, network: string, address: string): number {
-  const key = entryKey(network, address);
-  return registry.entries.findIndex((entry) => entryKey(entry.network, entry.address) === key);
+async function alreadyImported(address: string): Promise<boolean> {
+    const addressInfo = await callRpc('getaddressinfo', address);
+    return !!addressInfo?.data?.ismine || !!addressInfo?.data?.iswatchonly;
 }
 
-function computeSnapshotHash(utxos: WatchOnlyRegistrySnapshotUtxo[]): string {
-  const canonical = utxos
-    .slice()
-    .sort((left, right) => {
-      if (left.txid === right.txid) {
-        return left.vout - right.vout;
-      }
-      return left.txid.localeCompare(right.txid);
+async function importWatchOnlyAccount(
+    account: WatchOnlyAccount,
+    options?: { source?: string; refresh?: boolean },
+): Promise<WatchOnlyImportResult> {
+    const normalized = normalizeAccount(account);
+    if (!normalized) {
+        return {
+            address: String(account?.address || '').trim(),
+            pubkey: String(account?.pubkey || '').trim(),
+            imported: false,
+            refreshed: false,
+            skipped: false,
+            updated: false,
+            error: 'Invalid watch-only account',
+        };
+    }
+
+    const entries = await getRegistryEntries();
+    const now = Date.now();
+    const existing = entries.get(normalized.address);
+    const samePubkey = existing?.pubkey === normalized.pubkey;
+    const refreshRequested = !!options?.refresh;
+    const registryMatched = !!existing && samePubkey;
+
+    if (registryMatched && existing?.lastImportedAt && !refreshRequested) {
+        const nextEntry: WatchOnlyRegistryEntry = {
+            ...existing,
+            lastSeenAt: now,
+            source: options?.source || existing.source || 'sync-watchonly',
+        };
+        entries.set(normalized.address, nextEntry);
+        await persistRegistryEntries(entries);
+        return {
+            address: normalized.address,
+            pubkey: normalized.pubkey,
+            imported: false,
+            refreshed: false,
+            skipped: true,
+            updated: true,
+        };
+    }
+
+    const nextEntry: WatchOnlyRegistryEntry = {
+        address: normalized.address,
+        pubkey: normalized.pubkey,
+        source: options?.source || existing?.source || 'sync-watchonly',
+        firstSeenAt: existing?.firstSeenAt || now,
+        lastSeenAt: now,
+        lastImportedAt: existing?.lastImportedAt ?? null,
+        importCount: existing?.importCount ?? 0,
+        ...(existing?.lastError ? { lastError: existing.lastError } : {}),
+    };
+
+    try {
+        const importedAlready = await alreadyImported(normalized.address);
+        if (!importedAlready) {
+            const importRes = await callRpc('importpubkey', normalized.pubkey, 'default', false);
+            if (importRes.error) {
+                nextEntry.lastError = importRes.error;
+                entries.set(normalized.address, nextEntry);
+                await persistRegistryEntries(entries);
+                return {
+                    address: normalized.address,
+                    pubkey: normalized.pubkey,
+                    imported: false,
+                    refreshed: false,
+                    skipped: false,
+                    updated: true,
+                    error: importRes.error,
+                };
+            }
+            saveLog(ELogType.PUBKEYS, normalized.pubkey);
+            nextEntry.importCount += 1;
+        } else {
+            nextEntry.importCount = existing?.importCount ?? 0;
+        }
+
+        nextEntry.lastImportedAt = now;
+        delete nextEntry.lastError;
+        entries.set(normalized.address, nextEntry);
+        await persistRegistryEntries(entries);
+
+        return {
+            address: normalized.address,
+            pubkey: normalized.pubkey,
+            imported: !importedAlready,
+            refreshed: importedAlready,
+            skipped: importedAlready,
+            updated: !registryMatched || !samePubkey,
+        };
+    } catch (error: any) {
+        const message = error?.message || 'Failed to import watch-only account';
+        nextEntry.lastError = message;
+        entries.set(normalized.address, nextEntry);
+        await persistRegistryEntries(entries);
+        return {
+            address: normalized.address,
+            pubkey: normalized.pubkey,
+            imported: false,
+            refreshed: false,
+            skipped: false,
+            updated: true,
+            error: message,
+        };
+    }
+}
+
+export async function resolveWatchOnlyPubkey(address: string): Promise<string | undefined> {
+    const entries = await getRegistryEntries();
+    return entries.get(normalize(address))?.pubkey;
+}
+
+export async function loadWatchOnlyRegistrySnapshot(): Promise<WatchOnlyRegistrySnapshot> {
+    const entries = await getRegistryEntries();
+    return snapshotFromEntries(entries);
+}
+
+export async function listWatchOnlyEntries(input?: { network?: string; address?: string }) {
+    const snapshot = await loadWatchOnlyRegistrySnapshot();
+    const network = normalize(input?.network || envConfig.NETWORK || '').toLowerCase();
+    const address = normalize(input?.address || '');
+
+    return snapshot.entries.filter((entry) => {
+        const entryNetwork = normalize(envConfig.NETWORK || '').toLowerCase();
+        if (network && entryNetwork && network !== entryNetwork) {
+            return false;
+        }
+        if (address && entry.address !== address) {
+            return false;
+        }
+        return true;
     });
-
-  return createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
 }
 
-export function upsertWatchOnlyEntry(input: {
-  network?: string;
-  address: string;
-  pubkey: string;
-  imported?: boolean;
-  importError?: string | null;
+export async function getWatchOnlyRegistrySummary() {
+    const snapshot = await loadWatchOnlyRegistrySnapshot();
+    return {
+        version: 1,
+        updatedAt: snapshot.generatedAt,
+        entryCount: snapshot.entries.length,
+        entries: snapshot.entries,
+    };
+}
+
+export async function upsertWatchOnlyEntry(input: {
+    network?: string;
+    address: string;
+    pubkey: string;
+    imported?: boolean;
+    importError?: string | null;
 }) {
-  const registry = readRegistry();
-  const network = normalizeNetwork(input.network);
-  const address = normalize(input.address);
-  const pubkey = normalize(input.pubkey);
-  if (!address || !pubkey) {
-    return null;
-  }
-
-  const now = Date.now();
-  const idx = findEntryIndex(registry, network, address);
-  const existing = idx >= 0 ? registry.entries[idx] : null;
-  const nextEntry: WatchOnlyRegistryEntry = {
-    network,
-    address,
-    pubkey,
-    createdAt: existing?.createdAt || now,
-    lastSeenAt: now,
-    lastImportedAt: input.imported ? now : (existing?.lastImportedAt ?? null),
-    lastImportAttemptAt: now,
-    lastImportError: input.importError == null ? (existing?.lastImportError ?? null) : String(input.importError),
-    importCount: (existing?.importCount || 0) + (input.imported ? 1 : 0),
-    lastUtxoSnapshot: existing?.lastUtxoSnapshot || null,
-  };
-
-  if (idx >= 0) {
-    registry.entries[idx] = nextEntry;
-  } else {
-    registry.entries.push(nextEntry);
-  }
-
-  registry.updatedAt = now;
-  writeRegistry(registry);
-  return nextEntry;
+    const summary = await upsertWatchOnlyAccounts(
+        [{ address: input.address, pubkey: input.pubkey }],
+        { source: 'manual-upsert', refresh: !!input.imported }
+    );
+    return summary.results[0] || null;
 }
 
-export function markWatchOnlyImportOutcome(input: {
-  network?: string;
-  address: string;
-  pubkey: string;
-  success: boolean;
-  error?: string | null;
+function normalizeSnapshotUtxo(utxo: any) {
+    if (!utxo || typeof utxo !== 'object') return null;
+    const txid = normalize(String(utxo.txid || ''));
+    const vout = Number(utxo.vout);
+    if (!txid || !Number.isInteger(vout)) return null;
+    return {
+        txid,
+        vout,
+        amount: Number(utxo.amount || 0),
+        confirmations: Number(utxo.confirmations || 0),
+        scriptPubKey: utxo.scriptPubKey == null ? undefined : String(utxo.scriptPubKey),
+    };
+}
+
+function computeSnapshotHash(utxos: Array<ReturnType<typeof normalizeSnapshotUtxo>>) {
+    const canonical = (utxos || []).filter(Boolean).slice().sort((a, b) => {
+        if (a.txid === b.txid) {
+            return a.vout - b.vout;
+        }
+        return a.txid.localeCompare(b.txid);
+    });
+    return require('crypto').createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
+}
+
+export async function recordWatchOnlySnapshot(input: {
+    network?: string;
+    address: string;
+    pubkey?: string;
+    utxos: any[];
 }) {
-  return upsertWatchOnlyEntry({
-    network: input.network,
-    address: input.address,
-    pubkey: input.pubkey,
-    imported: input.success,
-    importError: input.success ? null : (input.error || 'Import failed'),
-  });
+    const registry = await getRegistryEntries();
+    const now = Date.now();
+    const address = normalize(input.address);
+    const network = normalize(input.network || envConfig.NETWORK || '').toLowerCase();
+    const pubkey = normalize(input.pubkey || '');
+    if (!address || !pubkey) {
+        return null;
+    }
+
+    const key = address;
+    const existing = registry.get(key) || {
+        address,
+        pubkey,
+        source: 'snapshot',
+        firstSeenAt: now,
+        lastSeenAt: now,
+        lastImportedAt: null,
+        importCount: 0,
+    } as WatchOnlyRegistryEntry;
+
+    const utxos = (Array.isArray(input.utxos) ? input.utxos : [])
+        .map(normalizeSnapshotUtxo)
+        .filter(Boolean);
+
+    const next: WatchOnlyRegistryEntry = {
+        ...existing,
+        address,
+        pubkey,
+        source: existing.source || 'snapshot',
+        firstSeenAt: existing.firstSeenAt || now,
+        lastSeenAt: now,
+        lastUtxoSnapshot: {
+            hash: computeSnapshotHash(utxos),
+            count: utxos.length,
+            totalAmount: utxos.reduce((sum, item) => sum + Number(item.amount || 0), 0),
+            updatedAt: now,
+            utxos,
+        },
+    };
+
+    registry.set(key, next);
+    await persistRegistryEntries(registry);
+    return next;
 }
 
-export function recordWatchOnlySnapshot(input: {
-  network?: string;
-  address: string;
-  pubkey?: string;
-  utxos: any[];
-}) {
-  const registry = readRegistry();
-  const network = normalizeNetwork(input.network);
-  const address = normalize(input.address);
-  const utxos = (Array.isArray(input.utxos) ? input.utxos : [])
-    .map(normalizeUtxo)
-    .filter(Boolean) as WatchOnlyRegistrySnapshotUtxo[];
-  const snapshotHash = computeSnapshotHash(utxos);
-  const totalAmount = utxos.reduce((sum, utxo) => sum + Number(utxo.amount || 0), 0);
-  const now = Date.now();
-  const idx = findEntryIndex(registry, network, address);
-  const existing = idx >= 0 ? registry.entries[idx] : null;
-  const pubkey = normalize(input.pubkey || existing?.pubkey || '');
+export async function upsertWatchOnlyAccounts(
+    accounts: WatchOnlyAccount[],
+    options?: { source?: string; refresh?: boolean },
+): Promise<WatchOnlySyncSummary> {
+    const results: WatchOnlyImportResult[] = [];
+    let imported = 0;
+    let refreshed = 0;
+    let skipped = 0;
+    let updated = 0;
+    let failed = 0;
 
-  if (!address || !pubkey) {
-    return null;
-  }
+    const seen = new Set<string>();
+    for (const account of accounts || []) {
+        const normalized = normalizeAccount(account);
+        if (!normalized) {
+            failed += 1;
+            results.push({
+                address: String(account?.address || '').trim(),
+                pubkey: String(account?.pubkey || '').trim(),
+                imported: false,
+                refreshed: false,
+                skipped: false,
+                updated: false,
+                error: 'Invalid watch-only account',
+            });
+            continue;
+        }
 
-  const nextEntry: WatchOnlyRegistryEntry = {
-    network,
-    address,
-    pubkey,
-    createdAt: existing?.createdAt || now,
-    lastSeenAt: now,
-    lastImportedAt: existing?.lastImportedAt ?? null,
-    lastImportAttemptAt: existing?.lastImportAttemptAt ?? null,
-    lastImportError: existing?.lastImportError ?? null,
-    importCount: existing?.importCount || 0,
-    lastUtxoSnapshot: {
-      hash: snapshotHash,
-      count: utxos.length,
-      totalAmount,
-      updatedAt: now,
-      utxos,
-    },
-  };
+        const dedupeKey = `${normalized.address}|${normalized.pubkey}`;
+        if (seen.has(dedupeKey)) {
+            skipped += 1;
+            results.push({
+                address: normalized.address,
+                pubkey: normalized.pubkey,
+                imported: false,
+                refreshed: false,
+                skipped: true,
+                updated: false,
+            });
+            continue;
+        }
+        seen.add(dedupeKey);
 
-  if (idx >= 0) {
-    registry.entries[idx] = nextEntry;
-  } else {
-    registry.entries.push(nextEntry);
-  }
+        const res = await importWatchOnlyAccount(normalized, options);
+        results.push(res);
 
-  registry.updatedAt = now;
-  writeRegistry(registry);
-  return nextEntry;
+        if (res.error) {
+            failed += 1;
+        } else if (res.imported) {
+            imported += 1;
+        } else if (res.refreshed) {
+            refreshed += 1;
+        } else if (res.skipped) {
+            skipped += 1;
+        }
+
+        if (res.updated) {
+            updated += 1;
+        }
+    }
+
+    const snapshot = await loadWatchOnlyRegistrySnapshot();
+    return {
+        imported,
+        refreshed,
+        skipped,
+        updated,
+        failed,
+        results,
+        snapshot,
+    };
 }
 
-export function resolveWatchOnlyPubkey(input: { network?: string; address: string }): string | null {
-  const registry = readRegistry();
-  const network = normalizeNetwork(input.network);
-  const address = normalize(input.address);
-  if (!address) {
-    return null;
-  }
+export async function reconcileWatchOnlyRegistry(): Promise<WatchOnlySyncSummary> {
+    const snapshot = await loadWatchOnlyRegistrySnapshot();
+    const results: WatchOnlyImportResult[] = [];
+    let imported = 0;
+    let refreshed = 0;
+    let skipped = 0;
+    let updated = 0;
+    let failed = 0;
 
-  const match = registry.entries.find((entry) => entryKey(entry.network, entry.address) === entryKey(network, address));
-  return match?.pubkey || null;
+    for (const entry of snapshot.entries) {
+        const res = await importWatchOnlyAccount(
+            { address: entry.address, pubkey: entry.pubkey },
+            { source: 'reconcile', refresh: true },
+        );
+        results.push(res);
+
+        if (res.error) {
+            failed += 1;
+        } else if (res.imported) {
+            imported += 1;
+        } else if (res.refreshed) {
+            refreshed += 1;
+        } else if (res.skipped) {
+            skipped += 1;
+        }
+
+        if (res.updated) {
+            updated += 1;
+        }
+    }
+
+    const nextSnapshot = await loadWatchOnlyRegistrySnapshot();
+    return {
+        imported,
+        refreshed,
+        skipped,
+        updated,
+        failed,
+        results,
+        snapshot: nextSnapshot,
+    };
 }
 
-export function listWatchOnlyEntries(input?: { network?: string; address?: string }) {
-  const registry = readRegistry();
-  const network = input?.network ? normalizeNetwork(input.network) : null;
-  const address = input?.address ? normalize(input.address) : null;
+export function startWatchOnlyRegistryReconciliation(intervalMs = Number(envConfig.WATCHONLY_RECONCILE_INTERVAL_MS || DEFAULT_RECONCILE_INTERVAL_MS)) {
+    const run = () => {
+        if (reconcileInFlight) return;
+        reconcileInFlight = true;
+        void reconcileWatchOnlyRegistry()
+            .catch((error) => {
+                console.warn('[watchonly-registry] reconcile failed:', error?.message || error);
+            })
+            .finally(() => {
+                reconcileInFlight = false;
+            });
+    };
 
-  return registry.entries
-    .filter((entry) => {
-      if (network && entry.network !== network) {
-        return false;
-      }
-      if (address && entry.address !== address) {
-        return false;
-      }
-      return true;
-    })
-    .sort((left, right) => right.lastSeenAt - left.lastSeenAt);
-}
-
-export function getWatchOnlyRegistrySummary() {
-  const registry = readRegistry();
-  return {
-    version: REGISTRY_VERSION,
-    updatedAt: registry.updatedAt,
-    entryCount: registry.entries.length,
-    entries: registry.entries.slice().sort((left, right) => right.lastSeenAt - left.lastSeenAt),
-  };
+    run();
+    const timer = setInterval(run, Math.max(60_000, Number.isFinite(intervalMs) ? intervalMs : DEFAULT_RECONCILE_INTERVAL_MS));
+    timer.unref?.();
+    return timer;
 }

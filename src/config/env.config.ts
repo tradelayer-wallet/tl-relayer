@@ -20,8 +20,8 @@ export const envConfig: {
     WATCH_RPC_PASS: string;
     WATCH_RPC_HOST: string;
     WATCH_RPC_PORT: number;
-    RELAYER_STATE_DIR: string;
     WATCHONLY_REGISTRY_PATH: string;
+    WATCHONLY_RECONCILE_INTERVAL_MS: number;
     VPN_KEYS: {
         VPN_CRIMINALIP: string;
         VPN_IPHUB: string;
@@ -44,8 +44,8 @@ export const envConfig: {
     WATCH_RPC_PASS: process.env.WATCH_RPC_PASS || process.env.RPC_PASS,
     WATCH_RPC_HOST: process.env.WATCH_RPC_HOST || process.env.RPC_HOST,
     WATCH_RPC_PORT: parseInt(process.env.WATCH_RPC_PORT || process.env.RPC_PORT),
-    RELAYER_STATE_DIR: process.env.TL_RELAYER_STATE_DIR || process.env.RELAYER_STATE_DIR || '',
-    WATCHONLY_REGISTRY_PATH: process.env.TL_WATCHONLY_REGISTRY_PATH || process.env.WATCHONLY_REGISTRY_PATH || '',
+    WATCHONLY_REGISTRY_PATH: process.env.WATCHONLY_REGISTRY_PATH || 'state/watchonly-registry.json',
+    WATCHONLY_RECONCILE_INTERVAL_MS: parseInt(process.env.WATCHONLY_RECONCILE_INTERVAL_MS || '300000', 10),
     VPN_KEYS: {
         VPN_CRIMINALIP: process.env.VPN_CRIMINALIP,
         VPN_IPHUB: process.env.VPN_IPHUB,

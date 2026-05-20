@@ -3,6 +3,7 @@ import { handleRoutes } from './routes/routes';
 import { handleRpcConnection } from './config/rpc.config';
 import { envConfig } from './config/env.config';
 import { WsRelayService } from './services/ws-relay.service';
+import { startWatchOnlyRegistryReconciliation } from './services/watchonly-registry.service';
 
 class FastifyServer {
     private _server: FastifyInstance;
@@ -21,7 +22,8 @@ class FastifyServer {
     start() {
         this.handleRoutes();
         this.handleRpcConnection();
-        this.handleSockets()
+        this.handleSockets();
+        this.handleWatchOnlyRegistry();
         if(!this.port){this.port=8000}
         this.server.listen(this.port, '0.0.0.0')
             .then(() => console.log(`Server Started On Port ${this.port}`))
@@ -35,6 +37,10 @@ class FastifyServer {
 
     private handleSockets() {
         new WsRelayService(this.server);
+    }
+
+    private handleWatchOnlyRegistry() {
+        startWatchOnlyRegistryReconciliation();
     }
 
     private handleRoutes() {
