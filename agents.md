@@ -31,6 +31,9 @@ The server agent should keep the following behavior intact:
 - `POST /address/watchonly/scan`
   - Body: `{ network?, address, pubkey?, scannedHeight?, scanSourceNodeId?, scanState? }`
   - Purpose: publish rescan/backfill coverage from an authoritative node.
+- `POST /address/watchonly/scan/run`
+  - Body: `{ network?, address?, fromHeight?, toHeight?, scanSourceNodeId?, force? }`
+  - Purpose: run the wallet RPC rescan/backfill on the selected node, then refresh and publish scan coverage.
 
 ## Registry rules
 
@@ -45,6 +48,7 @@ The server agent should keep the following behavior intact:
   - `backfilled`
   - `live`
   - `stale`
+- A designated scanner node may run `POST /address/watchonly/scan/run` and publish the resulting coverage; other nodes should consume the registry state and skip rescan if the coverage is current.
 - The registry is persisted to `TL_RELAYER_STATE_DIR` / `RELAYER_STATE_DIR` or `state/watchonly-registry.json` by default.
 
 ## Collator-backed mode

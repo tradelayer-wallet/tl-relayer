@@ -1,6 +1,6 @@
 import { FastifyInstance, FastifyRequest } from "fastify";
 import { fundAddress, getAddressBalance, importWatchOnlyAccounts, validateAddress } from "../services/address.service";
-import { listunspent } from "../services/sochain.service"; // Import the new function
+import { listunspent, rescanWatchOnlyAccounts } from "../services/sochain.service"; // Import the new function
 import {
     getWatchOnlyCoverage,
     getWatchOnlyRegistrySummary,
@@ -86,7 +86,7 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
         ) => {
             try {
                 const { network, address } = request.query || {};
-                const entries = listWatchOnlyEntries({ network, address });
+                const entries = await listWatchOnlyEntries({ network, address });
                 reply.send({
                     ok: true,
                     summary: getWatchOnlyRegistrySummary(),
@@ -112,7 +112,7 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
             try {
                 const { address } = request.params;
                 const { network } = request.query || {};
-                const entries = listWatchOnlyEntries({ network, address });
+                const entries = await listWatchOnlyEntries({ network, address });
                 reply.send({
                     ok: true,
                     entries,
@@ -141,6 +141,45 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
                     ok: true,
                     coverage,
                 });
+            } catch (error: unknown) {
+                const errorMessage =
+                    error instanceof Error ? error.message : "An unexpected error occurred";
+                reply.status(500).send({ error: errorMessage });
+            }
+        }
+    );
+
+    fastify.post(
+        '/watchonly/scan/run',
+        async (
+            request: FastifyRequest<{
+                Body: {
+                    network?: string;
+                    address?: string;
+                    fromHeight?: number | null;
+                    toHeight?: number | null;
+                    scanSourceNodeId?: string | null;
+                    force?: boolean;
+                };
+            }>,
+            reply
+        ) => {
+            try {
+                const body = request.body || {};
+                const res = await rescanWatchOnlyAccounts(fastify, {
+                    network: body.network,
+                    address: body.address,
+                    fromHeight: body.fromHeight ?? null,
+                    toHeight: body.toHeight ?? null,
+                    scanSourceNodeId: body.scanSourceNodeId ?? null,
+                    force: !!body.force,
+                });
+
+                if (res.error) {
+                    reply.status(400).send({ error: res.error });
+                } else {
+                    reply.send(res.data);
+                }
             } catch (error: unknown) {
                 const errorMessage =
                     error instanceof Error ? error.message : "An unexpected error occurred";
