@@ -82,11 +82,16 @@ export const listunspent = async (
                 })
             );
 
+        const chainInfo = await callRpc('getblockchaininfo');
+        const currentHeight = Number(chainInfo?.data?.blocks ?? chainInfo?.data?.result?.blocks);
+
         recordWatchOnlySnapshot({
             network,
             address,
             pubkey: effectivePubkey,
             utxos: data,
+            scannedHeight: Number.isFinite(currentHeight) ? currentHeight : null,
+            scanState: 'live',
         });
 
         return { data };

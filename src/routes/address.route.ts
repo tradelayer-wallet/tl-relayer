@@ -1,7 +1,13 @@
 import { FastifyInstance, FastifyRequest } from "fastify";
 import { fundAddress, getAddressBalance, importWatchOnlyAccounts, validateAddress } from "../services/address.service";
 import { listunspent } from "../services/sochain.service"; // Import the new function
-import { getWatchOnlyRegistrySummary, listWatchOnlyEntries, recordWatchOnlySnapshot } from "../services/watchonly-registry.service";
+import {
+    getWatchOnlyCoverage,
+    getWatchOnlyRegistrySummary,
+    listWatchOnlyEntries,
+    markWatchOnlyScanCoverage,
+    recordWatchOnlySnapshot,
+} from "../services/watchonly-registry.service";
 
 export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => {
     fastify.get('/validate/:address', async (request: FastifyRequest<{ Params: { address: string } }>, reply) => {
@@ -120,6 +126,29 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
         }
     );
 
+    fastify.get(
+        '/watchonly/:address/scan',
+        async (
+            request: FastifyRequest<{
+                Params: { address: string };
+            }>,
+            reply
+        ) => {
+            try {
+                const { address } = request.params;
+                const coverage = await getWatchOnlyCoverage(address);
+                reply.send({
+                    ok: true,
+                    coverage,
+                });
+            } catch (error: unknown) {
+                const errorMessage =
+                    error instanceof Error ? error.message : "An unexpected error occurred";
+                reply.status(500).send({ error: errorMessage });
+            }
+        }
+    );
+
     fastify.post(
         '/watchonly/snapshot',
         async (
@@ -152,6 +181,44 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
                 }
 
                 reply.send({ ok: true, entry: snapshot });
+            } catch (error: unknown) {
+                const errorMessage =
+                    error instanceof Error ? error.message : "An unexpected error occurred";
+                reply.status(500).send({ error: errorMessage });
+            }
+        }
+    );
+
+    fastify.post(
+        '/watchonly/scan',
+        async (
+            request: FastifyRequest<{
+                Body: {
+                    network?: string;
+                    address?: string;
+                    pubkey?: string;
+                    scannedHeight?: number | null;
+                    scanSourceNodeId?: string | null;
+                    scanState?: 'new' | 'imported' | 'backfilled' | 'live' | 'stale';
+                };
+            }>,
+            reply
+        ) => {
+            try {
+                const body = request.body || {};
+                if (!body.address) {
+                    reply.status(400).send({ error: 'Missing address' });
+                    return;
+                }
+                const res = await markWatchOnlyScanCoverage({
+                    network: body.network,
+                    address: body.address,
+                    pubkey: body.pubkey,
+                    scannedHeight: body.scannedHeight ?? null,
+                    scanSourceNodeId: body.scanSourceNodeId ?? null,
+                    scanState: body.scanState,
+                });
+                reply.send({ ok: true, entry: res });
             } catch (error: unknown) {
                 const errorMessage =
                     error instanceof Error ? error.message : "An unexpected error occurred";

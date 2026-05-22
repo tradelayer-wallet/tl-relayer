@@ -17,12 +17,19 @@ export interface WatchOnlyRegistryEntry extends WatchOnlyAccount {
     lastSeenAt: number;
     lastImportedAt: number | null;
     importCount: number;
+    scanState?: 'new' | 'imported' | 'backfilled' | 'live' | 'stale';
+    lastScannedAt?: number | null;
+    lastScannedHeight?: number | null;
+    scanSourceNodeId?: string | null;
+    lastSnapshotHeight?: number | null;
     lastError?: string;
     lastUtxoSnapshot?: {
         hash: string;
         count: number;
         totalAmount: number;
         updatedAt: number;
+        scannedHeight?: number | null;
+        scanSourceNodeId?: string | null;
         utxos: Array<{
             txid: string;
             vout: number;
@@ -47,6 +54,17 @@ export interface WatchOnlyImportResult {
     skipped: boolean;
     updated: boolean;
     error?: string;
+}
+
+export interface WatchOnlyScanCoverage {
+    address: string;
+    pubkey?: string;
+    currentTipHeight: number | null;
+    lastScannedHeight: number | null;
+    lastSnapshotHeight: number | null;
+    scanState: WatchOnlyRegistryEntry['scanState'];
+    needsRescan: boolean;
+    reason: string;
 }
 
 export interface WatchOnlySyncSummary {
@@ -119,6 +137,11 @@ function normalize(value: string): string {
     return String(value || '').trim();
 }
 
+function normalizeHeight(value: any): number | null {
+    const n = Number(value);
+    return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
 function normalizeAccount(account: Partial<WatchOnlyAccount> | null | undefined): WatchOnlyAccount | null {
     const address = normalize(String(account?.address || ''));
     const pubkey = normalize(String(account?.pubkey || ''));
@@ -135,6 +158,13 @@ function toEntry(raw: any): WatchOnlyRegistryEntry | null {
     const lastSeenAt = Number(raw?.lastSeenAt);
     const lastImportedAt = Number(raw?.lastImportedAt);
     const importCount = Number(raw?.importCount);
+    const lastScannedAt = Number(raw?.lastScannedAt);
+    const lastScannedHeight = normalizeHeight(raw?.lastScannedHeight);
+    const lastSnapshotHeight = normalizeHeight(raw?.lastSnapshotHeight);
+    const scanStateRaw = String(raw?.scanState || '').trim().toLowerCase();
+    const scanState = ['new', 'imported', 'backfilled', 'live', 'stale'].includes(scanStateRaw)
+        ? (scanStateRaw as WatchOnlyRegistryEntry['scanState'])
+        : undefined;
 
     const lastUtxoSnapshot = raw?.lastUtxoSnapshot && typeof raw.lastUtxoSnapshot === 'object'
         ? {
@@ -142,6 +172,8 @@ function toEntry(raw: any): WatchOnlyRegistryEntry | null {
             count: Number(raw.lastUtxoSnapshot.count || 0),
             totalAmount: Number(raw.lastUtxoSnapshot.totalAmount || 0),
             updatedAt: Number(raw.lastUtxoSnapshot.updatedAt || now),
+            scannedHeight: normalizeHeight(raw.lastUtxoSnapshot.scannedHeight),
+            scanSourceNodeId: raw.lastUtxoSnapshot.scanSourceNodeId == null ? undefined : String(raw.lastUtxoSnapshot.scanSourceNodeId),
             utxos: Array.isArray(raw.lastUtxoSnapshot.utxos) ? raw.lastUtxoSnapshot.utxos : [],
         }
         : undefined;
@@ -154,6 +186,11 @@ function toEntry(raw: any): WatchOnlyRegistryEntry | null {
         lastSeenAt: Number.isFinite(lastSeenAt) && lastSeenAt > 0 ? lastSeenAt : now,
         lastImportedAt: Number.isFinite(lastImportedAt) && lastImportedAt > 0 ? lastImportedAt : null,
         importCount: Number.isFinite(importCount) && importCount >= 0 ? importCount : 0,
+        ...(scanState ? { scanState } : {}),
+        ...(Number.isFinite(lastScannedAt) && lastScannedAt > 0 ? { lastScannedAt } : {}),
+        ...(lastScannedHeight != null ? { lastScannedHeight } : {}),
+        ...(lastSnapshotHeight != null ? { lastSnapshotHeight } : {}),
+        ...(raw?.scanSourceNodeId == null ? {} : { scanSourceNodeId: String(raw.scanSourceNodeId) }),
         ...(typeof raw?.lastError === 'string' && raw.lastError.trim() ? { lastError: raw.lastError.trim() } : {}),
         ...(lastUtxoSnapshot ? { lastUtxoSnapshot } : {}),
     };
@@ -233,6 +270,12 @@ async function alreadyImported(address: string): Promise<boolean> {
     return !!addressInfo?.data?.ismine || !!addressInfo?.data?.iswatchonly;
 }
 
+async function getCurrentChainHeight(): Promise<number | null> {
+    const chainInfo = await callRpc('getblockchaininfo');
+    const height = chainInfo?.data?.blocks ?? chainInfo?.data?.result?.blocks;
+    return normalizeHeight(height);
+}
+
 async function importWatchOnlyAccount(
     account: WatchOnlyAccount,
     options?: { source?: string; refresh?: boolean },
@@ -283,6 +326,11 @@ async function importWatchOnlyAccount(
         lastSeenAt: now,
         lastImportedAt: existing?.lastImportedAt ?? null,
         importCount: existing?.importCount ?? 0,
+        scanState: existing?.scanState || 'imported',
+        lastScannedAt: existing?.lastScannedAt ?? null,
+        lastScannedHeight: existing?.lastScannedHeight ?? null,
+        scanSourceNodeId: existing?.scanSourceNodeId ?? null,
+        lastSnapshotHeight: existing?.lastSnapshotHeight ?? null,
         ...(existing?.lastError ? { lastError: existing.lastError } : {}),
     };
 
@@ -311,6 +359,7 @@ async function importWatchOnlyAccount(
         }
 
         nextEntry.lastImportedAt = now;
+        nextEntry.scanState = nextEntry.scanState || 'imported';
         delete nextEntry.lastError;
         entries.set(normalized.address, nextEntry);
         await persistRegistryEntries(entries);
@@ -343,6 +392,35 @@ async function importWatchOnlyAccount(
 export async function resolveWatchOnlyPubkey(address: string): Promise<string | undefined> {
     const entries = await getRegistryEntries();
     return entries.get(normalize(address))?.pubkey;
+}
+
+export async function getWatchOnlyCoverage(address: string): Promise<WatchOnlyScanCoverage | null> {
+    const entries = await getRegistryEntries();
+    const entry = entries.get(normalize(address));
+    if (!entry) return null;
+
+    const currentTipHeight = await getCurrentChainHeight();
+    const lastScannedHeight = normalizeHeight(entry.lastScannedHeight);
+    const lastSnapshotHeight = normalizeHeight(entry.lastSnapshotHeight);
+    const coveredHeight = lastSnapshotHeight ?? lastScannedHeight;
+    const needsRescan = currentTipHeight == null
+        ? coveredHeight == null
+        : coveredHeight == null || coveredHeight < currentTipHeight;
+
+    return {
+        address: entry.address,
+        pubkey: entry.pubkey,
+        currentTipHeight,
+        lastScannedHeight,
+        lastSnapshotHeight,
+        scanState: entry.scanState || 'imported',
+        needsRescan,
+        reason: !entry.lastImportedAt
+            ? 'not imported'
+            : needsRescan
+                ? 'scan coverage is stale'
+                : 'scan coverage is current',
+    };
 }
 
 export async function loadWatchOnlyRegistrySnapshot(): Promise<WatchOnlyRegistrySnapshot> {
@@ -391,6 +469,25 @@ export async function upsertWatchOnlyEntry(input: {
     return summary.results[0] || null;
 }
 
+export async function markWatchOnlyScanCoverage(input: {
+    network?: string;
+    address: string;
+    pubkey?: string;
+    scannedHeight?: number | null;
+    scanSourceNodeId?: string | null;
+    scanState?: WatchOnlyRegistryEntry['scanState'];
+}) {
+    return recordWatchOnlySnapshot({
+        network: input.network,
+        address: input.address,
+        pubkey: input.pubkey,
+        utxos: [],
+        scannedHeight: input.scannedHeight,
+        scanSourceNodeId: input.scanSourceNodeId,
+        scanState: input.scanState || 'backfilled',
+    });
+}
+
 function normalizeSnapshotUtxo(utxo: any) {
     if (!utxo || typeof utxo !== 'object') return null;
     const txid = normalize(String(utxo.txid || ''));
@@ -420,6 +517,9 @@ export async function recordWatchOnlySnapshot(input: {
     address: string;
     pubkey?: string;
     utxos: any[];
+    scannedHeight?: number | null;
+    scanSourceNodeId?: string | null;
+    scanState?: WatchOnlyRegistryEntry['scanState'];
 }) {
     const registry = await getRegistryEntries();
     const now = Date.now();
@@ -452,11 +552,18 @@ export async function recordWatchOnlySnapshot(input: {
         source: existing.source || 'snapshot',
         firstSeenAt: existing.firstSeenAt || now,
         lastSeenAt: now,
+        scanState: input.scanState || existing.scanState || 'live',
+        lastScannedAt: now,
+        lastScannedHeight: normalizeHeight(input.scannedHeight) ?? existing.lastScannedHeight ?? null,
+        lastSnapshotHeight: normalizeHeight(input.scannedHeight) ?? existing.lastSnapshotHeight ?? null,
+        scanSourceNodeId: input.scanSourceNodeId || existing.scanSourceNodeId || null,
         lastUtxoSnapshot: {
             hash: computeSnapshotHash(utxos),
             count: utxos.length,
             totalAmount: utxos.reduce((sum, item) => sum + Number(item.amount || 0), 0),
             updatedAt: now,
+            scannedHeight: normalizeHeight(input.scannedHeight),
+            scanSourceNodeId: input.scanSourceNodeId || existing.scanSourceNodeId || null,
             utxos,
         },
     };

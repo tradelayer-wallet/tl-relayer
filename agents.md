@@ -26,6 +26,11 @@ The server agent should keep the following behavior intact:
 - `POST /address/watchonly/snapshot`
   - Body: `{ network?, address, pubkey?, utxos: [...] }`
   - Purpose: store the latest UTXO-set snapshot for an imported watch-only address.
+- `GET /address/watchonly/:address/scan`
+  - Returns scan coverage for one watch-only address.
+- `POST /address/watchonly/scan`
+  - Body: `{ network?, address, pubkey?, scannedHeight?, scanSourceNodeId?, scanState? }`
+  - Purpose: publish rescan/backfill coverage from an authoritative node.
 
 ## Registry rules
 
@@ -33,6 +38,13 @@ The server agent should keep the following behavior intact:
 - Every imported `{ address, pubkey }` pair should be upserted into the registry.
 - The relayer should fall back to the registry pubkey if a later UTXO poll omits one.
 - UTXO polling should record a snapshot hash so redundant imports and drift can be detected.
+- Every successful UTXO poll should also stamp the current chain height so the registry can tell whether a backfill is stale.
+- The scan coverage state should be treated as shared cluster metadata:
+  - `new`
+  - `imported`
+  - `backfilled`
+  - `live`
+  - `stale`
 - The registry is persisted to `TL_RELAYER_STATE_DIR` / `RELAYER_STATE_DIR` or `state/watchonly-registry.json` by default.
 
 ## Collator-backed mode
