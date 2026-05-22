@@ -1,6 +1,7 @@
 import * as os from 'node:os';
 import { envConfig } from "../config/env.config";
 import { callRpc, getWatchOnlyRegistryPubkey, importPubKey } from "./address.service";
+import { fetchExternalWatchOnlySnapshot } from "./watchonly-external.service";
 import {
     getWatchOnlyCoverage,
     listWatchOnlyEntries,
@@ -113,8 +114,81 @@ export const listunspent = async (
         return { data };
     } catch (error: unknown) {
         console.error('Error in listunspent: ', error);
-        return { error: error instanceof Error ? error.message : 'Unknown error' };
-    }
+    return { error: error instanceof Error ? error.message : 'Unknown error' };
+  }
+};
+
+export const verifyWatchOnlyAccountCoverage = async (
+    address: string,
+    network?: string,
+): Promise<{
+    ok: boolean;
+    address: string;
+    network: string;
+    local: {
+        hash: string | null;
+        count: number;
+        totalAmount: number;
+        updatedAt: number | null;
+    } | null;
+    external: {
+        source: string;
+        hash: string;
+        count: number;
+        totalAmount: number;
+        checkedAt: number;
+        network: string;
+    } | null;
+    needsRescan: boolean;
+    reason: string;
+}> => {
+    const entries = await listWatchOnlyEntries({ network, address });
+    const localEntry = entries[0] || null;
+    const externalSnapshot = await fetchExternalWatchOnlySnapshot(address, network);
+    const localSnapshot = localEntry?.lastUtxoSnapshot || null;
+    const localHash = localSnapshot?.hash ? String(localSnapshot.hash) : null;
+    const externalHash = externalSnapshot?.hash ? String(externalSnapshot.hash) : null;
+    const external = externalSnapshot
+        ? {
+            source: externalSnapshot.source,
+            hash: externalSnapshot.hash,
+            count: externalSnapshot.count,
+            totalAmount: externalSnapshot.totalAmount,
+            checkedAt: externalSnapshot.checkedAt,
+            network: externalSnapshot.network,
+        }
+        : null;
+    const local = localSnapshot
+        ? {
+            hash: localHash,
+            count: Number(localSnapshot.count || 0),
+            totalAmount: Number(localSnapshot.totalAmount || 0),
+            updatedAt: Number(localSnapshot.updatedAt || 0) || null,
+        }
+        : null;
+
+    const mismatch = !!externalSnapshot && (
+        !localSnapshot ||
+        localHash !== externalHash ||
+        Number(localSnapshot.count || 0) !== externalSnapshot.count ||
+        Number(localSnapshot.totalAmount || 0) !== externalSnapshot.totalAmount
+    );
+
+    return {
+        ok: true,
+        address,
+        network: String(network || envConfig.NETWORK || ''),
+        local,
+        external,
+        needsRescan: mismatch,
+        reason: !externalSnapshot
+            ? 'external utxo source unavailable'
+            : !localSnapshot
+                ? 'local snapshot missing'
+                : mismatch
+                    ? 'local snapshot differs from external utxo set'
+                    : 'local snapshot matches external utxo set',
+    };
 };
 
 export const rescanWatchOnlyAccounts = async (
@@ -158,15 +232,20 @@ export const rescanWatchOnlyAccounts = async (
 
         const coverage = await Promise.all(entries.map(async (entry) => {
             const currentCoverage = await getWatchOnlyCoverage(entry.address);
+            const externalCoverage = await verifyWatchOnlyAccountCoverage(entry.address, network || undefined);
             return {
                 address: entry.address,
                 coverage: currentCoverage,
+                externalCoverage,
             };
         }));
 
         const staleCoverage = coverage
             .map((item) => item.coverage)
             .filter((item): item is NonNullable<typeof item> => !!item && (item.needsRescan || force));
+        const externalMismatch = coverage
+            .map((item) => item.externalCoverage)
+            .filter((item): item is NonNullable<typeof item> => !!item && item.needsRescan);
 
         const startHeightCandidates = staleCoverage
             .reduce<number[]>((acc, item) => {
@@ -190,7 +269,9 @@ export const rescanWatchOnlyAccounts = async (
             : null;
 
         let rescanResult: any = null;
-        if (force || staleCoverage.length) {
+        const allowRescan = !!envConfig.WATCHONLY_RESCAN_OPT_IN;
+        const shouldRescan = force || (allowRescan && (staleCoverage.length > 0 || externalMismatch.length > 0));
+        if (shouldRescan) {
             const rescanParams = toHeight == null ? [fromHeight] : [fromHeight, toHeight];
             const rpcRes = await callRpc('rescanblockchain', ...rescanParams);
             if (rpcRes.error) {
@@ -211,7 +292,9 @@ export const rescanWatchOnlyAccounts = async (
                 99999999,
                 { address: entry.address, pubkey: entry.pubkey },
                 {
-                    scanState: force || entryCoverage?.needsRescan ? 'backfilled' : 'live',
+                    scanState: shouldRescan && (force || entryCoverage?.needsRescan || externalMismatch.some((item) => item.address === entry.address))
+                        ? 'backfilled'
+                        : 'live',
                     scanSourceNodeId,
                 },
             ]);
@@ -237,6 +320,8 @@ export const rescanWatchOnlyAccounts = async (
                 refreshed,
                 skipped,
                 failed,
+                allowRescan,
+                externalMismatch,
                 scanSourceNodeId,
                 fromHeight,
                 toHeight,

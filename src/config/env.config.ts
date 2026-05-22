@@ -17,6 +17,9 @@ export const envConfig: {
     COLLATOR_RPC_SERVICE: string;
     COLLATOR_RPC_NETWORK: string;
     WATCHONLY_REGISTRY_SEED_URL: string;
+    WATCHONLY_EXTERNAL_UTXO_SOURCE: string;
+    WATCHONLY_EXTERNAL_API_KEY: string;
+    WATCHONLY_RESCAN_OPT_IN: boolean;
     WATCH_RPC_USER: string;
     WATCH_RPC_PASS: string;
     WATCH_RPC_HOST: string;
@@ -42,6 +45,9 @@ export const envConfig: {
     COLLATOR_RPC_SERVICE: process.env.TL_COLLATOR_RPC_SERVICE || process.env.COLLATOR_RPC_SERVICE || 'tradelayer.rpc',
     COLLATOR_RPC_NETWORK: process.env.TL_COLLATOR_RPC_NETWORK || process.env.COLLATOR_RPC_NETWORK || process.env.NETWORK || '',
     WATCHONLY_REGISTRY_SEED_URL: process.env.WATCHONLY_REGISTRY_SEED_URL || process.env.TL_WATCHONLY_REGISTRY_SEED_URL || '',
+    WATCHONLY_EXTERNAL_UTXO_SOURCE: process.env.WATCHONLY_EXTERNAL_UTXO_SOURCE || 'sochain',
+    WATCHONLY_EXTERNAL_API_KEY: process.env.WATCHONLY_EXTERNAL_API_KEY || '',
+    WATCHONLY_RESCAN_OPT_IN: String(process.env.WATCHONLY_RESCAN_OPT_IN || '').trim().toLowerCase() === '1' || String(process.env.WATCHONLY_RESCAN_OPT_IN || '').trim().toLowerCase() === 'true',
     WATCH_RPC_USER: process.env.WATCH_RPC_USER || process.env.RPC_USER,
     WATCH_RPC_PASS: process.env.WATCH_RPC_PASS || process.env.RPC_PASS,
     WATCH_RPC_HOST: process.env.WATCH_RPC_HOST || process.env.RPC_HOST,

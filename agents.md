@@ -28,6 +28,8 @@ The server agent should keep the following behavior intact:
   - Purpose: store the latest UTXO-set snapshot for an imported watch-only address.
 - `GET /address/watchonly/:address/scan`
   - Returns scan coverage for one watch-only address.
+- `GET /address/watchonly/:address/verify`
+  - Compares the local watch-only snapshot against the external SoChain UTXO view.
 - `POST /address/watchonly/scan`
   - Body: `{ network?, address, pubkey?, scannedHeight?, scanSourceNodeId?, scanState? }`
   - Purpose: publish rescan/backfill coverage from an authoritative node.
@@ -54,6 +56,8 @@ The server agent should keep the following behavior intact:
 - A designated scanner node may run `POST /address/watchonly/scan/run` and publish the resulting coverage; other nodes should consume the registry state and skip rescan if the coverage is current.
 - The registry is persisted to `TL_RELAYER_STATE_DIR` / `RELAYER_STATE_DIR` or `state/watchonly-registry.json` by default.
 - If `WATCHONLY_REGISTRY_SEED_URL` or `TL_WATCHONLY_REGISTRY_SEED_URL` is set, the relayer will bootstrap the local registry from that source on startup when possible.
+- If `WATCHONLY_EXTERNAL_UTXO_SOURCE=sochain`, `WATCHONLY_EXTERNAL_API_KEY` may be provided to compare local snapshots against a public UTXO explorer before rescans.
+- The relayer only auto-runs `rescanblockchain` when `WATCHONLY_RESCAN_OPT_IN` is truthy.
 
 ## Collator-backed mode
 
