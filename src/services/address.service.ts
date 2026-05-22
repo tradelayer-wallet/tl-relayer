@@ -80,7 +80,7 @@ export const getAddressBalance = async (address: string) => {
             return res.data;
         }
 
-        const res = await axios.post(`${BASE_URL}/tl_getAllBalancesForAddress`, { params: address });
+        const res = await axios.post(`${BASE_URL}/tl_getallbalancesforaddress`, { params: address });
         return res.data;
     } catch (error: unknown) {
         const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';

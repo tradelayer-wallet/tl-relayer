@@ -13,7 +13,7 @@ export const getTokenInfo = async (propid) => {
       return res.data;
     }
 
-    const res = await axios.post(`${BASE_URL}/tl_getProperty`, { params: propid });
+    const res = await axios.post(`${BASE_URL}/tl_getproperty`, { params: propid });
     return res.data;
   } catch (error) {
     console.error('Error in getTokenInfo:', error);
@@ -31,7 +31,7 @@ export const listTokens = async () => {
       return res.data;
     }
 
-    const res = await axios.post(`${BASE_URL}/tl_listProperties`);
+    const res = await axios.post(`${BASE_URL}/tl_listproperties`);
     return res.data;
   } catch (error) {
     console.error('Error in listTokens:', error);

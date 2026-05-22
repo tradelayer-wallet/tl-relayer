@@ -177,6 +177,7 @@ console.log('RPC headers', request.headers['content-type']);
 
   try {
     const { method } = request.params as { method: string };
+    const normalizedMethod = String(method || '').trim().toLowerCase();
     const params: any[] = Array.isArray(request.body?.params)
       ? request.body.params
       : [];
@@ -184,7 +185,7 @@ console.log('RPC headers', request.headers['content-type']);
 
     // --- special cases ---
 
-    if (method === "listunspent") {
+    if (normalizedMethod === "listunspent") {
       const [minconf, maxconf, filter] = params;
 
       if (
@@ -209,7 +210,7 @@ console.log('RPC headers', request.headers['content-type']);
     }
 
 
-    if (method === "tl_getContractInfo") {
+    if (normalizedMethod === "tl_getcontractinfo") {
       const contractId = Number(raw?.contractId);
       if (!Number.isInteger(contractId)) {
         reply.code(400).send({ error: "Invalid contractId" });
@@ -223,7 +224,7 @@ console.log('RPC headers', request.headers['content-type']);
       return;
     }
 
-    if (method === "tl_channelBalanceForCommiter") {
+    if (normalizedMethod === "tl_channelbalanceforcommiter") {
       const address = String(params?.[0] ?? "");
       const propertyId = Number(params?.[1]);
       console.log('inside channel commit get '+address+' '+propertyId)
@@ -247,7 +248,7 @@ console.log('RPC headers', request.headers['content-type']);
     }
 
 
-    if (method === "tl_getInitMargin") {
+    if (normalizedMethod === "tl_getinitmargin") {
       const contractId = Number(raw?.contractId);
       const price = Number(raw?.price);
       if (!Number.isInteger(contractId) || !Number.isFinite(price)) {
@@ -264,7 +265,7 @@ console.log('RPC headers', request.headers['content-type']);
       return;
     }
 
-    if (method === "tl_tokenTradeHistoryForAddress") {
+    if (normalizedMethod === "tl_tokentradehistoryforaddress") {
       const propertyId1 = params?.[0];
       const propertyId2 = params?.[1];
       const address = String(params?.[2] ?? "");
@@ -280,7 +281,7 @@ console.log('RPC headers', request.headers['content-type']);
       return;
     }
 
-    if (method === "tl_contractTradeHistoryForAddress") {
+    if (normalizedMethod === "tl_contracttradehistoryforaddress") {
       const contractId = Number(params?.[0]);
       const address = String(params?.[2] ?? params?.[1] ?? "");
       if (!Number.isFinite(contractId) || !address) {
@@ -295,7 +296,7 @@ console.log('RPC headers', request.headers['content-type']);
       return;
     }
 
-    if (method === "tl_totalTradeHistoryForAddress") {
+    if (normalizedMethod === "tl_totaltradehistoryforaddress") {
       const address = String(params?.[0] ?? "");
       if (!address) {
         reply.code(400).send({ error: "Invalid address" });
@@ -311,13 +312,13 @@ console.log('RPC headers', request.headers['content-type']);
 
     // --- default passthrough ---
 
-    if (!allowedMethods.includes(method)) {
+    if (!allowedMethods.includes(normalizedMethod)) {
       reply.code(400).send({ error: `${method} not allowed` });
       return;
     }
 
-    const res = await rpcClient.call(method, ...params);
-    if (method === "sendrawtransaction" && res?.data) {
+    const res = await rpcClient.call(normalizedMethod, ...params);
+    if (normalizedMethod === "sendrawtransaction" && res?.data) {
       saveLog(ELogType.TXIDS, res.data);
     }
     reply.send(res);
