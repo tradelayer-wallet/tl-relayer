@@ -2,6 +2,7 @@ import { FastifyInstance, FastifyRequest } from "fastify";
 import { fundAddress, getAddressBalance, importWatchOnlyAccounts, validateAddress } from "../services/address.service";
 import { listunspent, rescanWatchOnlyAccounts } from "../services/sochain.service"; // Import the new function
 import {
+    bootstrapWatchOnlyRegistryFromSeed,
     getWatchOnlyCoverage,
     getWatchOnlyRegistrySummary,
     listWatchOnlyEntries,
@@ -141,6 +142,35 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
                     ok: true,
                     coverage,
                 });
+            } catch (error: unknown) {
+                const errorMessage =
+                    error instanceof Error ? error.message : "An unexpected error occurred";
+                reply.status(500).send({ error: errorMessage });
+            }
+        }
+    );
+
+    fastify.post(
+        '/watchonly/bootstrap',
+        async (
+            request: FastifyRequest<{
+                Body: {
+                    sourceUrl?: string;
+                    network?: string;
+                    force?: boolean;
+                };
+            }>,
+            reply
+        ) => {
+            try {
+                const body = request.body || {};
+                const res = await bootstrapWatchOnlyRegistryFromSeed({
+                    sourceUrl: body.sourceUrl,
+                    network: body.network,
+                    force: !!body.force,
+                });
+
+                reply.send({ ok: true, ...res });
             } catch (error: unknown) {
                 const errorMessage =
                     error instanceof Error ? error.message : "An unexpected error occurred";

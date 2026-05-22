@@ -265,6 +265,138 @@ async function persistRegistryEntries(entries: Map<string, WatchOnlyRegistryEntr
     registryCache = entries;
 }
 
+async function upsertWatchOnlyRegistryEntries(
+    entries: Array<Partial<WatchOnlyRegistryEntry>>,
+    options?: { source?: string; refresh?: boolean },
+): Promise<WatchOnlySyncSummary> {
+    const registry = await getRegistryEntries();
+    const now = Date.now();
+    const results: WatchOnlyImportResult[] = [];
+    let imported = 0;
+    let refreshed = 0;
+    let skipped = 0;
+    let updated = 0;
+    let failed = 0;
+
+    for (const raw of entries || []) {
+        const entry = toEntry(raw);
+        if (!entry) {
+            failed += 1;
+            results.push({
+                address: String(raw?.address || '').trim(),
+                pubkey: String(raw?.pubkey || '').trim(),
+                imported: false,
+                refreshed: false,
+                skipped: false,
+                updated: false,
+                error: 'Invalid watch-only entry',
+            });
+            continue;
+        }
+
+        const existing = registry.get(entry.address);
+        const merged: WatchOnlyRegistryEntry = {
+            ...(existing || entry),
+            ...entry,
+            source: options?.source || entry.source || existing?.source || 'bootstrap',
+            firstSeenAt: existing?.firstSeenAt || entry.firstSeenAt || now,
+            lastSeenAt: now,
+            lastImportedAt: entry.lastImportedAt ?? existing?.lastImportedAt ?? null,
+            importCount: Number.isFinite(Number(entry.importCount)) ? Number(entry.importCount) : (existing?.importCount ?? 0),
+            scanState: entry.scanState || existing?.scanState || 'imported',
+            lastScannedAt: entry.lastScannedAt ?? existing?.lastScannedAt ?? null,
+            lastScannedHeight: normalizeHeight(entry.lastScannedHeight) ?? existing?.lastScannedHeight ?? null,
+            scanSourceNodeId: entry.scanSourceNodeId ?? existing?.scanSourceNodeId ?? null,
+            lastSnapshotHeight: normalizeHeight(entry.lastSnapshotHeight) ?? existing?.lastSnapshotHeight ?? null,
+            ...(entry.lastError || existing?.lastError ? { lastError: entry.lastError || existing?.lastError } : {}),
+            ...(entry.lastUtxoSnapshot || existing?.lastUtxoSnapshot
+                ? { lastUtxoSnapshot: entry.lastUtxoSnapshot || existing?.lastUtxoSnapshot }
+                : {}),
+        };
+
+        registry.set(entry.address, merged);
+        results.push({
+            address: entry.address,
+            pubkey: entry.pubkey,
+            imported: !existing,
+            refreshed: !!existing,
+            skipped: !!existing,
+            updated: true,
+        });
+        if (existing) {
+            refreshed += 1;
+            skipped += 1;
+        } else {
+            imported += 1;
+        }
+        updated += 1;
+    }
+
+    await persistRegistryEntries(registry);
+    const snapshot = snapshotFromEntries(registry);
+    return {
+        imported,
+        refreshed,
+        skipped,
+        updated,
+        failed,
+        results,
+        snapshot,
+    };
+}
+
+export async function bootstrapWatchOnlyRegistryFromSeed(input?: {
+    sourceUrl?: string;
+    network?: string;
+    force?: boolean;
+}) {
+    const sourceUrl = trimSlash(String(input?.sourceUrl || envConfig.WATCHONLY_REGISTRY_SEED_URL || ''));
+    if (!sourceUrl) {
+        return {
+            imported: 0,
+            refreshed: 0,
+            skipped: 0,
+            updated: 0,
+            failed: 0,
+            results: [],
+            snapshot: await loadWatchOnlyRegistrySnapshot(),
+            sourceUrl: null,
+        };
+    }
+
+    const current = await loadWatchOnlyRegistrySnapshot();
+    if (!input?.force && current.entries.length > 0) {
+        return {
+            imported: 0,
+            refreshed: 0,
+            skipped: current.entries.length,
+            updated: 0,
+            failed: 0,
+            results: [],
+            snapshot: current,
+            sourceUrl,
+        };
+    }
+
+    const url = input?.network
+        ? `${sourceUrl}/address/watchonly?network=${encodeURIComponent(String(input.network))}`
+        : `${sourceUrl}/address/watchonly`;
+
+    const response = await axios.get(url, { timeout: 15_000 });
+    const payload: any = response.data || {};
+    const entries = Array.isArray(payload?.entries)
+        ? payload.entries
+        : Array.isArray(payload)
+            ? payload
+            : [];
+
+    const imported = await upsertWatchOnlyRegistryEntries(entries, { source: `bootstrap:${sourceUrl}` });
+    return {
+        ...imported,
+        sourceUrl,
+    };
+}
+
 async function alreadyImported(address: string): Promise<boolean> {
     const addressInfo = await callRpc('getaddressinfo', address);
     return !!addressInfo?.data?.ismine || !!addressInfo?.data?.iswatchonly;
@@ -690,20 +822,25 @@ export async function reconcileWatchOnlyRegistry(): Promise<WatchOnlySyncSummary
 }
 
 export function startWatchOnlyRegistryReconciliation(intervalMs = Number(envConfig.WATCHONLY_RECONCILE_INTERVAL_MS || DEFAULT_RECONCILE_INTERVAL_MS)) {
-    const run = () => {
+    const run = async () => {
         if (reconcileInFlight) return;
         reconcileInFlight = true;
-        void reconcileWatchOnlyRegistry()
-            .catch((error) => {
-                console.warn('[watchonly-registry] reconcile failed:', error?.message || error);
-            })
-            .finally(() => {
-                reconcileInFlight = false;
-            });
+        try {
+            await bootstrapWatchOnlyRegistryFromSeed();
+            await reconcileWatchOnlyRegistry();
+        } catch (error) {
+            console.warn('[watchonly-registry] reconcile failed:', error?.message || error);
+        } finally {
+            reconcileInFlight = false;
+        }
     };
 
-    run();
-    const timer = setInterval(run, Math.max(60_000, Number.isFinite(intervalMs) ? intervalMs : DEFAULT_RECONCILE_INTERVAL_MS));
+    void run();
+    const timer = setInterval(() => {
+        void run().catch((error) => {
+            console.warn('[watchonly-registry] reconcile failed:', error?.message || error);
+        });
+    }, Math.max(60_000, Number.isFinite(intervalMs) ? intervalMs : DEFAULT_RECONCILE_INTERVAL_MS));
     timer.unref?.();
     return timer;
 }
