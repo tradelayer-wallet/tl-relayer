@@ -13,6 +13,8 @@ export interface WatchOnlyAccount {
 
 export interface WatchOnlyRegistryEntry extends WatchOnlyAccount {
     source: string;
+    assignedProviderNodeId?: string | null;
+    assignedAt?: number | null;
     firstSeenAt: number;
     lastSeenAt: number;
     lastImportedAt: number | null;
@@ -92,7 +94,7 @@ function useCollatorRpc(): boolean {
     return !!String(envConfig.COLLATOR_URL || '').trim();
 }
 
-async function callRpc(method: string, ...params: any[]): Promise<{ data?: any; error?: string }> {
+async function callRpc(method: string, ...params: any[]): Promise<{ data?: any; error?: string; providerNodeId?: string }> {
     if (!useCollatorRpc()) {
         return rpcClient.call(method, ...params);
     }
@@ -117,6 +119,9 @@ async function callRpc(method: string, ...params: any[]): Promise<{ data?: any; 
 
         return {
             data: payload?.result ?? payload?.data ?? payload,
+            providerNodeId: typeof payload?.providerNodeId === 'string' && payload.providerNodeId.trim()
+                ? payload.providerNodeId.trim()
+                : undefined,
         };
     } catch (error: any) {
         const payload = error?.response?.data;
@@ -158,6 +163,7 @@ function toEntry(raw: any): WatchOnlyRegistryEntry | null {
     const lastSeenAt = Number(raw?.lastSeenAt);
     const lastImportedAt = Number(raw?.lastImportedAt);
     const importCount = Number(raw?.importCount);
+    const assignedAt = Number(raw?.assignedAt);
     const lastScannedAt = Number(raw?.lastScannedAt);
     const lastScannedHeight = normalizeHeight(raw?.lastScannedHeight);
     const lastSnapshotHeight = normalizeHeight(raw?.lastSnapshotHeight);
@@ -182,6 +188,8 @@ function toEntry(raw: any): WatchOnlyRegistryEntry | null {
         address: account.address,
         pubkey: account.pubkey,
         source: normalize(String(raw?.source || 'sync-watchonly')) || 'sync-watchonly',
+        ...(raw?.assignedProviderNodeId == null ? {} : { assignedProviderNodeId: String(raw.assignedProviderNodeId) }),
+        ...(Number.isFinite(assignedAt) && assignedAt > 0 ? { assignedAt } : {}),
         firstSeenAt: Number.isFinite(firstSeenAt) && firstSeenAt > 0 ? firstSeenAt : now,
         lastSeenAt: Number.isFinite(lastSeenAt) && lastSeenAt > 0 ? lastSeenAt : now,
         lastImportedAt: Number.isFinite(lastImportedAt) && lastImportedAt > 0 ? lastImportedAt : null,
@@ -299,6 +307,8 @@ async function upsertWatchOnlyRegistryEntries(
             ...(existing || entry),
             ...entry,
             source: options?.source || entry.source || existing?.source || 'bootstrap',
+            assignedProviderNodeId: entry.assignedProviderNodeId ?? entry.scanSourceNodeId ?? existing?.assignedProviderNodeId ?? null,
+            assignedAt: normalizeHeight(entry.assignedAt) ?? existing?.assignedAt ?? null,
             firstSeenAt: existing?.firstSeenAt || entry.firstSeenAt || now,
             lastSeenAt: now,
             lastImportedAt: entry.lastImportedAt ?? existing?.lastImportedAt ?? null,
@@ -454,6 +464,8 @@ async function importWatchOnlyAccount(
         address: normalized.address,
         pubkey: normalized.pubkey,
         source: options?.source || existing?.source || 'sync-watchonly',
+        assignedProviderNodeId: existing?.assignedProviderNodeId ?? existing?.scanSourceNodeId ?? null,
+        assignedAt: existing?.assignedAt ?? null,
         firstSeenAt: existing?.firstSeenAt || now,
         lastSeenAt: now,
         lastImportedAt: existing?.lastImportedAt ?? null,
@@ -486,6 +498,10 @@ async function importWatchOnlyAccount(
             }
             saveLog(ELogType.PUBKEYS, normalized.pubkey);
             nextEntry.importCount += 1;
+            if (importRes.providerNodeId) {
+                nextEntry.assignedProviderNodeId = importRes.providerNodeId;
+                nextEntry.assignedAt = now;
+            }
         } else {
             nextEntry.importCount = existing?.importCount ?? 0;
         }
@@ -682,6 +698,8 @@ export async function recordWatchOnlySnapshot(input: {
         address,
         pubkey,
         source: existing.source || 'snapshot',
+        assignedProviderNodeId: existing.assignedProviderNodeId ?? input.scanSourceNodeId ?? null,
+        assignedAt: existing.assignedAt ?? null,
         firstSeenAt: existing.firstSeenAt || now,
         lastSeenAt: now,
         scanState: input.scanState || existing.scanState || 'live',
