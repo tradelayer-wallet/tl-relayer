@@ -191,8 +191,29 @@ export const listunspent = async (
             error: error instanceof Error ? error.message : String(error),
         });
         return { error: error instanceof Error ? error.message : 'Unknown error' };
-  }
+    }
 };
+
+async function resolveLocalAddressPubkey(address: string): Promise<string | undefined> {
+    const addressInfo = await callRpc('getaddressinfo', address);
+    const rawInfo: any = addressInfo as any;
+    const info = rawInfo?.data || rawInfo?.result || {};
+    const candidates = [
+        info?.pubkey,
+        info?.pubKey,
+        info?.pubkeyHex,
+        info?.pubkeyhex,
+        info?.publicKey,
+        info?.publickey,
+    ];
+
+    for (const candidate of candidates) {
+        const pubkey = String(candidate || '').trim();
+        if (pubkey) return pubkey;
+    }
+
+    return undefined;
+}
 
 export const verifyWatchOnlyAccountCoverage = async (
     address: string,
@@ -272,6 +293,7 @@ export const rescanWatchOnlyAccounts = async (
     params?: {
         network?: string;
         address?: string;
+        pubkey?: string;
         fromHeight?: number | null;
         toHeight?: number | null;
         lookbackBlocks?: number | null;
@@ -282,6 +304,7 @@ export const rescanWatchOnlyAccounts = async (
     try {
         const network = String(params?.network || envConfig.NETWORK || '').trim();
         const address = String(params?.address || '').trim();
+        const requestedPubkey = String(params?.pubkey || '').trim();
         const scanSourceNodeId = String(params?.scanSourceNodeId || `${os.hostname()}:${process.pid}`).trim();
         const force = !!params?.force;
         const lookbackBlocks = Math.max(
@@ -291,10 +314,29 @@ export const rescanWatchOnlyAccounts = async (
                 : Math.floor(Number(envConfig.WATCHONLY_RESCAN_LOOKBACK_BLOCKS || 10)),
         );
 
-        const entries = await listWatchOnlyEntries({
+        let entries = await listWatchOnlyEntries({
             network: network || undefined,
             address: address || undefined,
         });
+
+        if (address && !entries.some((entry) => entry.address === address)) {
+            const resolvedPubkey = requestedPubkey || await resolveLocalAddressPubkey(address);
+            if (resolvedPubkey) {
+                const importResult = await importPubKey(server, [resolvedPubkey, address]);
+                if (importResult.error) {
+                    return { error: importResult.error };
+                }
+
+                entries = await listWatchOnlyEntries({
+                    network: network || undefined,
+                    address: address || undefined,
+                });
+            } else {
+                return {
+                    error: `Unable to import ${address}: no pubkey was provided and the local node did not return one.`,
+                };
+            }
+        }
 
         if (!entries.length) {
             return {

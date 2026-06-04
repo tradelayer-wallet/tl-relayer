@@ -248,6 +248,7 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
                 Body: {
                     network?: string;
                     address?: string;
+                    pubkey?: string;
                     fromHeight?: number | null;
                     toHeight?: number | null;
                     lookbackBlocks?: number | null;
@@ -271,6 +272,7 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
                 const res = await rescanWatchOnlyAccounts(fastify, {
                     network: body.network,
                     address: body.address,
+                    pubkey: body.pubkey,
                     fromHeight: body.fromHeight ?? null,
                     toHeight: body.toHeight ?? null,
                     lookbackBlocks: body.lookbackBlocks ?? null,
