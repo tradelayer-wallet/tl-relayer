@@ -136,6 +136,7 @@ async function handleGetChannelColumn(request: any, reply: any) {
 
 const allowedMethods = [
   "tl_getallbalancesforaddress",
+  "tl_listproperties",
   "tl_getproperty",
   "tl_list_attestation",
   "tl_getbalance",
@@ -171,9 +172,15 @@ const allowedMethods = [
   "getrawmempool",
 ];
 
+function logPortfolioHeartbeat(event: string, details: Record<string, unknown>) {
+  console.log(`[portfolio-heartbeat][relayer][rpc-route] ${event}`, details);
+}
+
 async function handleGenericRpc(request: any, reply: any) {
-console.log('RPC raw body', request.body);
-console.log('RPC headers', request.headers['content-type']);
+logPortfolioHeartbeat('incoming', {
+  method: String(request.params?.method || '').trim(),
+  contentType: request.headers['content-type'] || null,
+});
 
   try {
     const { method } = request.params as { method: string };
@@ -187,6 +194,12 @@ console.log('RPC headers', request.headers['content-type']);
 
     if (normalizedMethod === "listunspent") {
       const [minconf, maxconf, filter] = params;
+      logPortfolioHeartbeat('listunspent-request', {
+        minconf,
+        maxconf,
+        address: String(filter?.address || '').trim(),
+        hasPubkey: !!filter?.pubkey,
+      });
 
       if (
         typeof minconf !== "number" ||
@@ -205,6 +218,10 @@ console.log('RPC headers', request.headers['content-type']);
       ];
 
       const res = await listunspent(request.server, typedParams);
+      logPortfolioHeartbeat('listunspent-response', {
+        hasError: !!res?.error,
+        count: Array.isArray(res?.data) ? res.data.length : 0,
+      });
       reply.send(res);
       return;
     }
@@ -227,7 +244,10 @@ console.log('RPC headers', request.headers['content-type']);
     if (normalizedMethod === "tl_channelbalanceforcommiter") {
       const address = String(params?.[0] ?? "");
       const propertyId = Number(params?.[1]);
-      console.log('inside channel commit get '+address+' '+propertyId)
+      logPortfolioHeartbeat('tl_channelbalanceforcommiter-request', {
+        address: String(address || '').trim(),
+        propertyId,
+      });
       if (!address || !Number.isInteger(propertyId)) {
         reply
           .code(400)
@@ -241,7 +261,10 @@ console.log('RPC headers', request.headers['content-type']);
           params: { address, propertyId },
         }
       );
-      console.log('response data', res.data);
+      logPortfolioHeartbeat('tl_channelbalanceforcommiter-response', {
+        address: String(address || '').trim(),
+        hasData: !!res?.data,
+      });
 
       reply.send(res.data);
       return;

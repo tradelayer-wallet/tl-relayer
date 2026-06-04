@@ -6,11 +6,51 @@ import {
     getWatchOnlyCoverage,
     listWatchOnlyEntries,
     recordWatchOnlySnapshot,
+    resolveWatchOnlyRescanStartHeight,
     upsertWatchOnlyEntry,
 } from "./watchonly-registry.service";
 
 const baseURL = "https://api.blockcypher.com/v1/";
 const token = "a2b9d2c5fbfc49f39589c2751f599725"; // BlockCypher API token
+
+function logPortfolioHeartbeat(scope: string, event: string, details: Record<string, unknown>) {
+    console.log(`[portfolio-heartbeat][relayer][${scope}] ${event}`, details);
+}
+
+function deriveFirstFundingScanInfo(
+    utxos: Array<{ txid: string; confirmations: number }>,
+    currentHeight: number | null,
+): { firstFundingHeight: number | null; firstFundingTxid: string | null } {
+    const confirmed = (Array.isArray(utxos) ? utxos : [])
+        .filter((u) => Number.isFinite(Number(u?.confirmations)) && Number(u.confirmations) > 0)
+        .map((u) => ({
+            txid: String(u?.txid || '').trim(),
+            confirmations: Number(u.confirmations),
+        }))
+        .filter((u) => !!u.txid);
+
+    if (!confirmed.length || !Number.isFinite(Number(currentHeight)) || Number(currentHeight) < 0) {
+        return { firstFundingHeight: null, firstFundingTxid: null };
+    }
+
+    const withHeights = confirmed.map((u) => ({
+        txid: u.txid,
+        height: Math.max(0, Number(currentHeight) - u.confirmations + 1),
+    }));
+    withHeights.sort((a, b) => a.height - b.height || a.txid.localeCompare(b.txid));
+    const earliest = withHeights[0];
+    return {
+        firstFundingHeight: earliest?.height ?? null,
+        firstFundingTxid: earliest?.txid ?? null,
+    };
+}
+
+async function getCurrentChainHeight(): Promise<number | null> {
+    const chainInfo = await callRpc('getblockchaininfo');
+    const height = chainInfo?.data?.blocks ?? chainInfo?.data?.result?.blocks;
+    const parsed = Number(height);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
 
 export const listunspent = async (
     server: any,
@@ -37,16 +77,31 @@ export const listunspent = async (
             return { error: `Error with getting UTXOs. Code: 0` };
         }
 
-        console.log('params in listunspent ' + address + ' ' + effectivePubkey);
+        logPortfolioHeartbeat('utxo', 'request', {
+            address,
+            network,
+            hasPubkey: !!effectivePubkey,
+            scanState: scanOptions.scanState || 'live',
+            scanSourceNodeId: scanOptions.scanSourceNodeId || null,
+            minBlock,
+            maxBlock,
+        });
 
         const label = "";
 
         // Validate the address
         const addressInfo = await callRpc('getaddressinfo', address);
-        console.log(JSON.stringify(addressInfo));
+        logPortfolioHeartbeat('utxo', 'address-info', {
+            address,
+            ismine: !!addressInfo?.data?.ismine,
+            iswatchonly: !!addressInfo?.data?.iswatchonly,
+        });
 
         if (!addressInfo || !addressInfo.data || !addressInfo.data.ismine) {
-            console.log('Address not recognized as owned. ' + JSON.stringify(addressInfo));
+            logPortfolioHeartbeat('utxo', 'address-unowned', {
+                address,
+                hasPubkey: !!effectivePubkey,
+            });
 
             // Check if the pubkey needs to be imported
             if (effectivePubkey) {
@@ -58,7 +113,11 @@ export const listunspent = async (
                 });
 
                 const importResult = await importPubKey(server, [effectivePubkey, address]);
-                console.log('Import result ' + JSON.stringify(importResult));
+                logPortfolioHeartbeat('utxo', 'importpubkey', {
+                    address,
+                    imported: !importResult.error,
+                    error: importResult.error || null,
+                });
 
                 if (importResult.error) {
                     throw new Error(`Failed to import pubkey: ${importResult.error}`);
@@ -70,7 +129,11 @@ export const listunspent = async (
 
         // Attempt to fetch unspent UTXOs using the RPC client
         const luRes = await callRpc('listunspent', minBlock, maxBlock, [address]);
-        console.log('outputs for ' + address + ' ' + JSON.stringify(luRes));
+        logPortfolioHeartbeat('utxo', 'listunspent-result', {
+            address,
+            hasError: !!luRes.error,
+            count: Array.isArray(luRes.data) ? luRes.data.length : 0,
+        });
 
         if (luRes.error || !luRes.data) {
             throw new Error(`listunspent RPC error: ${luRes.error}`);
@@ -100,6 +163,7 @@ export const listunspent = async (
 
         const chainInfo = await callRpc('getblockchaininfo');
         const currentHeight = Number(chainInfo?.data?.blocks ?? chainInfo?.data?.result?.blocks);
+        const firstFunding = deriveFirstFundingScanInfo(data, Number.isFinite(currentHeight) ? currentHeight : null);
 
         recordWatchOnlySnapshot({
             network,
@@ -107,14 +171,26 @@ export const listunspent = async (
             pubkey: effectivePubkey,
             utxos: data,
             scannedHeight: Number.isFinite(currentHeight) ? currentHeight : null,
+            firstFundingHeight: firstFunding.firstFundingHeight,
+            firstFundingTxid: firstFunding.firstFundingTxid,
             scanState: scanOptions.scanState || 'live',
+            scanSourceNodeId: scanOptions.scanSourceNodeId || `${os.hostname()}:${process.pid}`,
+        });
+
+        logPortfolioHeartbeat('utxo', 'snapshot-recorded', {
+            address,
+            count: data.length,
+            scannedHeight: Number.isFinite(currentHeight) ? currentHeight : null,
             scanSourceNodeId: scanOptions.scanSourceNodeId || `${os.hostname()}:${process.pid}`,
         });
 
         return { data };
     } catch (error: unknown) {
-        console.error('Error in listunspent: ', error);
-    return { error: error instanceof Error ? error.message : 'Unknown error' };
+        console.error('[portfolio-heartbeat][relayer][utxo] error', {
+            address: String(params?.[2]?.address || '').trim() || null,
+            error: error instanceof Error ? error.message : String(error),
+        });
+        return { error: error instanceof Error ? error.message : 'Unknown error' };
   }
 };
 
@@ -198,6 +274,7 @@ export const rescanWatchOnlyAccounts = async (
         address?: string;
         fromHeight?: number | null;
         toHeight?: number | null;
+        lookbackBlocks?: number | null;
         scanSourceNodeId?: string | null;
         force?: boolean;
     }
@@ -207,6 +284,12 @@ export const rescanWatchOnlyAccounts = async (
         const address = String(params?.address || '').trim();
         const scanSourceNodeId = String(params?.scanSourceNodeId || `${os.hostname()}:${process.pid}`).trim();
         const force = !!params?.force;
+        const lookbackBlocks = Math.max(
+            0,
+            Number.isFinite(Number(params?.lookbackBlocks))
+                ? Math.floor(Number(params?.lookbackBlocks))
+                : Math.floor(Number(envConfig.WATCHONLY_RESCAN_LOOKBACK_BLOCKS || 10)),
+        );
 
         const entries = await listWatchOnlyEntries({
             network: network || undefined,
@@ -248,22 +331,18 @@ export const rescanWatchOnlyAccounts = async (
             .filter((item): item is NonNullable<typeof item> => !!item && item.needsRescan);
 
         const startHeightCandidates = staleCoverage
-            .reduce<number[]>((acc, item) => {
-                if (Number.isFinite(Number(item.lastSnapshotHeight)) && Number(item.lastSnapshotHeight) >= 0) {
-                    acc.push(Number(item.lastSnapshotHeight));
-                }
-                if (Number.isFinite(Number(item.lastScannedHeight)) && Number(item.lastScannedHeight) >= 0) {
-                    acc.push(Number(item.lastScannedHeight));
-                }
-                return acc;
-            }, [])
+            .map((item) => resolveWatchOnlyRescanStartHeight({
+                firstFundingHeight: item.firstFundingHeight ?? null,
+                lastSnapshotHeight: item.lastSnapshotHeight ?? null,
+                lastScannedHeight: item.lastScannedHeight ?? null,
+            }))
             .filter((value): value is number => Number.isFinite(Number(value)) && Number(value) >= 0)
-            .map((value) => Number(value));
+            .map((value) => Math.max(0, Number(value) - lookbackBlocks));
         const fromHeight = Number.isFinite(Number(params?.fromHeight))
             ? Math.max(0, Number(params?.fromHeight))
             : startHeightCandidates.length
                 ? Math.max(0, Math.min(...startHeightCandidates))
-                : 0;
+                : Math.max(0, (await getCurrentChainHeight() ?? 0) - lookbackBlocks);
         const toHeight = Number.isFinite(Number(params?.toHeight))
             ? Math.max(0, Number(params?.toHeight))
             : null;
@@ -273,6 +352,15 @@ export const rescanWatchOnlyAccounts = async (
         const shouldRescan = force || (allowRescan && (staleCoverage.length > 0 || externalMismatch.length > 0));
         if (shouldRescan) {
             const rescanParams = toHeight == null ? [fromHeight] : [fromHeight, toHeight];
+            logPortfolioHeartbeat('utxo', 'rescan-request', {
+                network,
+                address: address || null,
+                fromHeight,
+                toHeight,
+                scanSourceNodeId,
+                force,
+                coverageCount: entries.length,
+            });
             const rpcRes = await callRpc('rescanblockchain', ...rescanParams);
             if (rpcRes.error) {
                 throw new Error(rpcRes.error);
@@ -298,6 +386,12 @@ export const rescanWatchOnlyAccounts = async (
                     scanSourceNodeId,
                 },
             ]);
+            logPortfolioHeartbeat('utxo', 'rescan-coverage', {
+                address: entry.address,
+                hasError: !!listRes.error,
+                count: Array.isArray(listRes.data) ? listRes.data.length : 0,
+                scanSourceNodeId,
+            });
 
             if (listRes.error) {
                 failed += 1;
@@ -320,6 +414,7 @@ export const rescanWatchOnlyAccounts = async (
                 refreshed,
                 skipped,
                 failed,
+                lookbackBlocks,
                 allowRescan,
                 externalMismatch,
                 scanSourceNodeId,

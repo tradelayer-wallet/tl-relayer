@@ -25,7 +25,15 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
     fastify.get('/balance/:address', async (request: FastifyRequest<{ Params: { address: string } }>, reply) => {
         try {
             const { address } = request.params;
+            console.log('[portfolio-heartbeat][relayer][route] /address/balance request', {
+                address: String(address || '').trim(),
+            });
             const res = await getAddressBalance(address);
+            console.log('[portfolio-heartbeat][relayer][route] /address/balance response', {
+                address: String(address || '').trim(),
+                hasData: res != null,
+                responseType: Array.isArray(res) ? 'array' : typeof res,
+            });
             reply.send(res);
         } catch (error: unknown) {
             const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
@@ -56,6 +64,10 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
                 const accounts = Array.isArray(request.body?.accounts)
                     ? request.body.accounts
                     : [];
+                console.log('[portfolio-heartbeat][relayer][route] /address/sync-watchonly request', {
+                    count: accounts.length,
+                    addresses: accounts.map((account) => String(account?.address || '').trim()).filter(Boolean),
+                });
                 const res = await importWatchOnlyAccounts(
                     fastify,
                     accounts.map((account) => ({
@@ -65,8 +77,16 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
                 );
 
                 if (res.error) {
+                    console.warn('[portfolio-heartbeat][relayer][route] /address/sync-watchonly failed', res.error);
                     reply.status(400).send({ error: res.error });
                 } else {
+                    console.log('[portfolio-heartbeat][relayer][route] /address/sync-watchonly response', {
+                        imported: res.data?.imported ?? 0,
+                        refreshed: res.data?.refreshed ?? 0,
+                        skipped: res.data?.skipped ?? 0,
+                        updated: res.data?.updated ?? 0,
+                        failed: res.data?.failed ?? 0,
+                    });
                     reply.send(res.data);
                 }
             } catch (error: unknown) {
@@ -87,6 +107,10 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
         ) => {
             try {
                 const { network, address } = request.query || {};
+                console.log('[portfolio-heartbeat][relayer][route] /address/watchonly request', {
+                    network: network || null,
+                    address: address || null,
+                });
                 const entries = await listWatchOnlyEntries({ network, address });
                 reply.send({
                     ok: true,
@@ -113,6 +137,10 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
             try {
                 const { address } = request.params;
                 const { network } = request.query || {};
+                console.log('[portfolio-heartbeat][relayer][route] /address/watchonly/:address request', {
+                    address: String(address || '').trim(),
+                    network: network || null,
+                });
                 const entries = await listWatchOnlyEntries({ network, address });
                 reply.send({
                     ok: true,
@@ -137,6 +165,9 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
         ) => {
             try {
                 const { address } = request.params;
+                console.log('[portfolio-heartbeat][relayer][route] /address/watchonly/:address/scan request', {
+                    address: String(address || '').trim(),
+                });
                 const coverage = await getWatchOnlyCoverage(address);
                 reply.send({
                     ok: true,
@@ -164,6 +195,11 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
         ) => {
             try {
                 const body = request.body || {};
+                console.log('[portfolio-heartbeat][relayer][route] /address/watchonly/bootstrap request', {
+                    sourceUrl: body.sourceUrl || null,
+                    network: body.network || null,
+                    force: !!body.force,
+                });
                 const res = await bootstrapWatchOnlyRegistryFromSeed({
                     sourceUrl: body.sourceUrl,
                     network: body.network,
@@ -191,6 +227,10 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
             try {
                 const { address } = request.params;
                 const { network } = request.query || {};
+                console.log('[portfolio-heartbeat][relayer][route] /address/watchonly/:address/verify request', {
+                    address: String(address || '').trim(),
+                    network: network || null,
+                });
                 const report = await verifyWatchOnlyAccountCoverage(address, network);
                 reply.send({ ok: true, report });
             } catch (error: unknown) {
@@ -210,6 +250,7 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
                     address?: string;
                     fromHeight?: number | null;
                     toHeight?: number | null;
+                    lookbackBlocks?: number | null;
                     scanSourceNodeId?: string | null;
                     force?: boolean;
                 };
@@ -218,11 +259,21 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
         ) => {
             try {
                 const body = request.body || {};
+                console.log('[portfolio-heartbeat][relayer][route] /address/watchonly/scan/run request', {
+                    network: body.network || null,
+                    address: body.address || null,
+                    fromHeight: body.fromHeight ?? null,
+                    toHeight: body.toHeight ?? null,
+                    lookbackBlocks: body.lookbackBlocks ?? null,
+                    scanSourceNodeId: body.scanSourceNodeId || null,
+                    force: !!body.force,
+                });
                 const res = await rescanWatchOnlyAccounts(fastify, {
                     network: body.network,
                     address: body.address,
                     fromHeight: body.fromHeight ?? null,
                     toHeight: body.toHeight ?? null,
+                    lookbackBlocks: body.lookbackBlocks ?? null,
                     scanSourceNodeId: body.scanSourceNodeId ?? null,
                     force: !!body.force,
                 });
@@ -259,6 +310,12 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
                     reply.status(400).send({ error: 'Missing address' });
                     return;
                 }
+                console.log('[portfolio-heartbeat][relayer][route] /address/watchonly/snapshot request', {
+                    address: String(body.address || '').trim(),
+                    network: body.network || null,
+                    hasPubkey: !!body.pubkey,
+                    utxoCount: Array.isArray(body.utxos) ? body.utxos.length : 0,
+                });
                 const snapshot = recordWatchOnlySnapshot({
                     network: body.network,
                     address: body.address,
@@ -301,6 +358,14 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
                     reply.status(400).send({ error: 'Missing address' });
                     return;
                 }
+                console.log('[portfolio-heartbeat][relayer][route] /address/watchonly/scan request', {
+                    address: String(body.address || '').trim(),
+                    network: body.network || null,
+                    hasPubkey: !!body.pubkey,
+                    scannedHeight: body.scannedHeight ?? null,
+                    scanSourceNodeId: body.scanSourceNodeId || null,
+                    scanState: body.scanState || null,
+                });
                 const res = await markWatchOnlyScanCoverage({
                     network: body.network,
                     address: body.address,
@@ -333,6 +398,10 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
                 const pubkey = body.pubkey;
                 const minBlock = 1;
                 const maxBlock = 99999999;
+                console.log('[portfolio-heartbeat][relayer][route] /address/utxo request', {
+                    address: String(address || '').trim(),
+                    hasPubkey: !!pubkey,
+                });
 
                 const res = await listunspent(fastify, [
                     minBlock,
@@ -341,8 +410,16 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
                 ]);
 
                 if (res.error) {
+                    console.warn('[portfolio-heartbeat][relayer][route] /address/utxo failed', {
+                        address: String(address || '').trim(),
+                        error: res.error,
+                    });
                     reply.status(400).send({ error: res.error });
                 } else {
+                    console.log('[portfolio-heartbeat][relayer][route] /address/utxo response', {
+                        address: String(address || '').trim(),
+                        count: Array.isArray(res.data) ? res.data.length : 0,
+                    });
                     reply.send(res.data);
                 }
             } catch (error: unknown) {

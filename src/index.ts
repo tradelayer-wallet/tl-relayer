@@ -19,9 +19,10 @@ class FastifyServer {
         return this._server
     }
 
-    start() {
+    async start() {
+        await this.handleCors();
         this.handleRoutes();
-        this.handleRpcConnection();
+        await this.handleRpcConnection();
         this.handleSockets();
         this.handleWatchOnlyRegistry();
         if(!this.port){this.port=8000}
@@ -51,6 +52,14 @@ class FastifyServer {
         const connected = await handleRpcConnection();
         const message = connected ? `RPC Connected` : `ERROR: RPC connection fails`;
         console.log(message);
+    }
+
+    private async handleCors() {
+        await this.server.register(require('@fastify/cors'), {
+            origin: true,
+            methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+            credentials: true,
+        });
     }
 }
 

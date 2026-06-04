@@ -16,6 +16,8 @@ export interface WatchOnlyRegistryEntry extends WatchOnlyAccount {
     assignedProviderNodeId?: string | null;
     assignedAt?: number | null;
     firstSeenAt: number;
+    firstFundingHeight?: number | null;
+    firstFundingTxid?: string | null;
     lastSeenAt: number;
     lastImportedAt: number | null;
     importCount: number;
@@ -61,6 +63,8 @@ export interface WatchOnlyImportResult {
 export interface WatchOnlyScanCoverage {
     address: string;
     pubkey?: string;
+    firstFundingHeight?: number | null;
+    firstFundingTxid?: string | null;
     currentTipHeight: number | null;
     lastScannedHeight: number | null;
     lastSnapshotHeight: number | null;
@@ -86,12 +90,56 @@ let registryCache: Map<string, WatchOnlyRegistryEntry> | null = null;
 let registryLoadPromise: Promise<Map<string, WatchOnlyRegistryEntry>> | null = null;
 let reconcileInFlight = false;
 
+const PORTFOLIO_HEARTBEAT_METHODS = new Set([
+    'getaddressinfo',
+    'getblockchaininfo',
+    'importpubkey',
+    'listunspent',
+    'tl_getallbalancesforaddress',
+]);
+
 function trimSlash(value: string): string {
     return String(value || '').replace(/\/+$/, '');
 }
 
 function useCollatorRpc(): boolean {
     return !!String(envConfig.COLLATOR_URL || '').trim();
+}
+
+function isPortfolioHeartbeatRpc(method: string): boolean {
+    return PORTFOLIO_HEARTBEAT_METHODS.has(String(method || '').trim().toLowerCase());
+}
+
+function summarizePortfolioHeartbeatRpc(method: string, params: any[]): Record<string, unknown> {
+    const normalizedMethod = String(method || '').trim().toLowerCase();
+    const first = params?.[0];
+    const second = params?.[1];
+    const third = params?.[2];
+
+    if (normalizedMethod === 'listunspent' && third && typeof third === 'object') {
+        return {
+            minBlock: first,
+            maxBlock: second,
+            address: String(third.address || '').trim(),
+            hasPubkey: !!third.pubkey,
+        };
+    }
+
+    if (normalizedMethod === 'importpubkey') {
+        return {
+            hasPubkey: !!first,
+            address: String(second || '').trim(),
+        };
+    }
+
+    if (
+        normalizedMethod === 'getaddressinfo' ||
+        normalizedMethod === 'tl_getallbalancesforaddress'
+    ) {
+        return { address: String(first || '').trim() };
+    }
+
+    return { paramsCount: params.length };
 }
 
 async function callRpc(method: string, ...params: any[]): Promise<{ data?: any; error?: string; providerNodeId?: string }> {
@@ -101,6 +149,15 @@ async function callRpc(method: string, ...params: any[]): Promise<{ data?: any; 
 
     try {
         const url = trimSlash(envConfig.COLLATOR_URL);
+        if (isPortfolioHeartbeatRpc(method)) {
+            console.log('[portfolio-heartbeat][relayer][registry-rpc] request', {
+                method,
+                service: envConfig.COLLATOR_RPC_SERVICE,
+                network: envConfig.COLLATOR_RPC_NETWORK || null,
+                route: '/rpc/route',
+                ...summarizePortfolioHeartbeatRpc(method, params),
+            });
+        }
         const res = await axios.post(
             `${url}/rpc/route`,
             {
@@ -114,9 +171,22 @@ async function callRpc(method: string, ...params: any[]): Promise<{ data?: any; 
 
         const payload: any = res.data || {};
         if (payload.ok === false) {
+            if (isPortfolioHeartbeatRpc(method)) {
+                console.warn('[portfolio-heartbeat][relayer][registry-rpc] failure', {
+                    method,
+                    error: payload?.error?.message || payload?.error || 'Collator RPC failed',
+                });
+            }
             return { error: payload?.error?.message || payload?.error || 'Collator RPC failed' };
         }
 
+        if (isPortfolioHeartbeatRpc(method)) {
+            console.log('[portfolio-heartbeat][relayer][registry-rpc] response', {
+                method,
+                hasData: payload?.result != null || payload?.data != null,
+                providerNodeId: payload?.providerNodeId || null,
+            });
+        }
         return {
             data: payload?.result ?? payload?.data ?? payload,
             providerNodeId: typeof payload?.providerNodeId === 'string' && payload.providerNodeId.trim()
@@ -130,6 +200,12 @@ async function callRpc(method: string, ...params: any[]): Promise<{ data?: any; 
             payload?.error ||
             error?.message ||
             'Collator RPC failed';
+        if (isPortfolioHeartbeatRpc(method)) {
+            console.warn('[portfolio-heartbeat][relayer][registry-rpc] error', {
+                method,
+                message,
+            });
+        }
         return { error: message };
     }
 }
@@ -147,6 +223,11 @@ function normalizeHeight(value: any): number | null {
     return Number.isFinite(n) && n >= 0 ? n : null;
 }
 
+function normalizeTxid(value: any): string | null {
+    const txid = normalize(String(value || ''));
+    return txid || null;
+}
+
 function normalizeAccount(account: Partial<WatchOnlyAccount> | null | undefined): WatchOnlyAccount | null {
     const address = normalize(String(account?.address || ''));
     const pubkey = normalize(String(account?.pubkey || ''));
@@ -160,6 +241,8 @@ function toEntry(raw: any): WatchOnlyRegistryEntry | null {
 
     const now = Date.now();
     const firstSeenAt = Number(raw?.firstSeenAt);
+    const firstFundingHeight = normalizeHeight(raw?.firstFundingHeight);
+    const firstFundingTxid = normalizeTxid(raw?.firstFundingTxid);
     const lastSeenAt = Number(raw?.lastSeenAt);
     const lastImportedAt = Number(raw?.lastImportedAt);
     const importCount = Number(raw?.importCount);
@@ -191,6 +274,8 @@ function toEntry(raw: any): WatchOnlyRegistryEntry | null {
         ...(raw?.assignedProviderNodeId == null ? {} : { assignedProviderNodeId: String(raw.assignedProviderNodeId) }),
         ...(Number.isFinite(assignedAt) && assignedAt > 0 ? { assignedAt } : {}),
         firstSeenAt: Number.isFinite(firstSeenAt) && firstSeenAt > 0 ? firstSeenAt : now,
+        ...(firstFundingHeight != null ? { firstFundingHeight } : {}),
+        ...(firstFundingTxid ? { firstFundingTxid } : {}),
         lastSeenAt: Number.isFinite(lastSeenAt) && lastSeenAt > 0 ? lastSeenAt : now,
         lastImportedAt: Number.isFinite(lastImportedAt) && lastImportedAt > 0 ? lastImportedAt : null,
         importCount: Number.isFinite(importCount) && importCount >= 0 ? importCount : 0,
@@ -310,6 +395,8 @@ async function upsertWatchOnlyRegistryEntries(
             assignedProviderNodeId: entry.assignedProviderNodeId ?? entry.scanSourceNodeId ?? existing?.assignedProviderNodeId ?? null,
             assignedAt: normalizeHeight(entry.assignedAt) ?? existing?.assignedAt ?? null,
             firstSeenAt: existing?.firstSeenAt || entry.firstSeenAt || now,
+            firstFundingHeight: normalizeHeight(entry.firstFundingHeight) ?? existing?.firstFundingHeight ?? null,
+            firstFundingTxid: normalizeTxid(entry.firstFundingTxid) ?? existing?.firstFundingTxid ?? null,
             lastSeenAt: now,
             lastImportedAt: entry.lastImportedAt ?? existing?.lastImportedAt ?? null,
             importCount: Number.isFinite(Number(entry.importCount)) ? Number(entry.importCount) : (existing?.importCount ?? 0),
@@ -467,6 +554,8 @@ async function importWatchOnlyAccount(
         assignedProviderNodeId: existing?.assignedProviderNodeId ?? existing?.scanSourceNodeId ?? null,
         assignedAt: existing?.assignedAt ?? null,
         firstSeenAt: existing?.firstSeenAt || now,
+        firstFundingHeight: existing?.firstFundingHeight ?? null,
+        firstFundingTxid: existing?.firstFundingTxid ?? null,
         lastSeenAt: now,
         lastImportedAt: existing?.lastImportedAt ?? null,
         importCount: existing?.importCount ?? 0,
@@ -479,6 +568,12 @@ async function importWatchOnlyAccount(
     };
 
     try {
+        console.log('[portfolio-heartbeat][relayer][registry] import-request', {
+            address: normalized.address,
+            source: options?.source || existing?.source || 'sync-watchonly',
+            refreshRequested,
+            alreadyTracked: !!existing,
+        });
         const importedAlready = await alreadyImported(normalized.address);
         if (!importedAlready) {
             const importRes = await callRpc('importpubkey', normalized.pubkey, 'default', false);
@@ -502,8 +597,17 @@ async function importWatchOnlyAccount(
                 nextEntry.assignedProviderNodeId = importRes.providerNodeId;
                 nextEntry.assignedAt = now;
             }
+            console.log('[portfolio-heartbeat][relayer][registry] import-complete', {
+                address: normalized.address,
+                imported: true,
+                providerNodeId: importRes.providerNodeId || null,
+            });
         } else {
             nextEntry.importCount = existing?.importCount ?? 0;
+            console.log('[portfolio-heartbeat][relayer][registry] import-skipped', {
+                address: normalized.address,
+                reason: 'already-imported',
+            });
         }
 
         nextEntry.lastImportedAt = now;
@@ -548,6 +652,8 @@ export async function getWatchOnlyCoverage(address: string): Promise<WatchOnlySc
     if (!entry) return null;
 
     const currentTipHeight = await getCurrentChainHeight();
+    const firstFundingHeight = normalizeHeight(entry.firstFundingHeight);
+    const firstFundingTxid = normalizeTxid(entry.firstFundingTxid);
     const lastScannedHeight = normalizeHeight(entry.lastScannedHeight);
     const lastSnapshotHeight = normalizeHeight(entry.lastSnapshotHeight);
     const coveredHeight = lastSnapshotHeight ?? lastScannedHeight;
@@ -558,6 +664,8 @@ export async function getWatchOnlyCoverage(address: string): Promise<WatchOnlySc
     return {
         address: entry.address,
         pubkey: entry.pubkey,
+        firstFundingHeight,
+        firstFundingTxid,
         currentTipHeight,
         lastScannedHeight,
         lastSnapshotHeight,
@@ -565,10 +673,23 @@ export async function getWatchOnlyCoverage(address: string): Promise<WatchOnlySc
         needsRescan,
         reason: !entry.lastImportedAt
             ? 'not imported'
+            : firstFundingHeight != null && coveredHeight == null
+                ? 'scan coverage can start at first funding height'
             : needsRescan
                 ? 'scan coverage is stale'
                 : 'scan coverage is current',
     };
+}
+
+export function resolveWatchOnlyRescanStartHeight(entry?: Partial<WatchOnlyRegistryEntry> | null): number | null {
+    const candidates = [
+        normalizeHeight(entry?.firstFundingHeight),
+        normalizeHeight(entry?.lastSnapshotHeight),
+        normalizeHeight(entry?.lastScannedHeight),
+    ].filter((value): value is number => Number.isFinite(Number(value)) && Number(value) >= 0);
+
+    if (!candidates.length) return null;
+    return Math.max(0, Math.min(...candidates));
 }
 
 export async function loadWatchOnlyRegistrySnapshot(): Promise<WatchOnlyRegistrySnapshot> {
@@ -621,6 +742,8 @@ export async function markWatchOnlyScanCoverage(input: {
     network?: string;
     address: string;
     pubkey?: string;
+    firstFundingHeight?: number | null;
+    firstFundingTxid?: string | null;
     scannedHeight?: number | null;
     scanSourceNodeId?: string | null;
     scanState?: WatchOnlyRegistryEntry['scanState'];
@@ -630,6 +753,8 @@ export async function markWatchOnlyScanCoverage(input: {
         address: input.address,
         pubkey: input.pubkey,
         utxos: [],
+        firstFundingHeight: input.firstFundingHeight ?? null,
+        firstFundingTxid: input.firstFundingTxid ?? null,
         scannedHeight: input.scannedHeight,
         scanSourceNodeId: input.scanSourceNodeId,
         scanState: input.scanState || 'backfilled',
@@ -665,6 +790,8 @@ export async function recordWatchOnlySnapshot(input: {
     address: string;
     pubkey?: string;
     utxos: any[];
+    firstFundingHeight?: number | null;
+    firstFundingTxid?: string | null;
     scannedHeight?: number | null;
     scanSourceNodeId?: string | null;
     scanState?: WatchOnlyRegistryEntry['scanState'];
@@ -693,6 +820,14 @@ export async function recordWatchOnlySnapshot(input: {
         .map(normalizeSnapshotUtxo)
         .filter(Boolean);
 
+    console.log('[portfolio-heartbeat][relayer][registry] snapshot', {
+        address,
+        count: utxos.length,
+        network,
+        scanSourceNodeId: input.scanSourceNodeId || existing.scanSourceNodeId || null,
+        scanState: input.scanState || existing.scanState || 'live',
+    });
+
     const next: WatchOnlyRegistryEntry = {
         ...existing,
         address,
@@ -701,6 +836,8 @@ export async function recordWatchOnlySnapshot(input: {
         assignedProviderNodeId: existing.assignedProviderNodeId ?? input.scanSourceNodeId ?? null,
         assignedAt: existing.assignedAt ?? null,
         firstSeenAt: existing.firstSeenAt || now,
+        firstFundingHeight: normalizeHeight(input.firstFundingHeight) ?? existing.firstFundingHeight ?? null,
+        firstFundingTxid: normalizeTxid(input.firstFundingTxid) ?? existing.firstFundingTxid ?? null,
         lastSeenAt: now,
         scanState: input.scanState || existing.scanState || 'live',
         lastScannedAt: now,
