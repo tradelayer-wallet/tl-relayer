@@ -1,6 +1,7 @@
 import axios from 'axios';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { randomBytes } from 'node:crypto';
 
 import { envConfig } from '../config/env.config';
 import { rpcClient } from '../config/rpc.config';
@@ -129,12 +130,15 @@ function summarizePortfolioHeartbeatRpc(method: string, params: any[]): Record<s
         return {
             hasPubkey: !!first,
             address: String(second || '').trim(),
+            mappedAction: 'watchonly-registry-add',
         };
     }
 
     if (
         normalizedMethod === 'getaddressinfo' ||
-        normalizedMethod === 'tl_getallbalancesforaddress'
+        normalizedMethod === 'tl_getallbalancesforaddress' ||
+        normalizedMethod === 'tl_listproperties' ||
+        normalizedMethod === 'tl_getproperty'
     ) {
         return { address: String(first || '').trim() };
     }
@@ -155,6 +159,7 @@ async function callRpc(method: string, ...params: any[]): Promise<{ data?: any; 
                 service: envConfig.COLLATOR_RPC_SERVICE,
                 network: envConfig.COLLATOR_RPC_NETWORK || null,
                 route: '/rpc/route',
+                sourceEndpoint: 'testnet-api',
                 ...summarizePortfolioHeartbeatRpc(method, params),
             });
         }
@@ -352,10 +357,23 @@ async function persistRegistryEntries(entries: Map<string, WatchOnlyRegistryEntr
     const dir = path.dirname(registryPath);
     await fs.promises.mkdir(dir, { recursive: true });
 
-    const tmpPath = `${registryPath}.tmp`;
-    await fs.promises.writeFile(tmpPath, `${JSON.stringify(snapshot, null, 2)}\n`, 'utf8');
-    await fs.promises.rename(tmpPath, registryPath);
-    registryCache = entries;
+    const tmpPath = `${registryPath}.${process.pid}.${Date.now()}.${randomBytes(4).toString('hex')}.tmp`;
+    try {
+        await fs.promises.writeFile(tmpPath, `${JSON.stringify(snapshot, null, 2)}\n`, 'utf8');
+        try {
+            await fs.promises.rename(tmpPath, registryPath);
+        } catch (renameError: any) {
+            const message = String(renameError?.message || renameError || '').toLowerCase();
+            if (message.includes('enoent')) {
+                await fs.promises.writeFile(registryPath, `${JSON.stringify(snapshot, null, 2)}\n`, 'utf8');
+            } else {
+                throw renameError;
+            }
+        }
+        registryCache = entries;
+    } finally {
+        await fs.promises.unlink(tmpPath).catch(() => undefined);
+    }
 }
 
 async function upsertWatchOnlyRegistryEntries(
@@ -429,7 +447,9 @@ async function upsertWatchOnlyRegistryEntries(
         updated += 1;
     }
 
-    await persistRegistryEntries(registry);
+    await persistRegistryEntries(registry).catch((error) => {
+        console.warn('[watchonly-registry] persist skipped after batch upsert:', (error as Error)?.message || error);
+    });
     const snapshot = snapshotFromEntries(registry);
     return {
         imported,
@@ -536,7 +556,9 @@ async function importWatchOnlyAccount(
             source: options?.source || existing.source || 'sync-watchonly',
         };
         entries.set(normalized.address, nextEntry);
-        await persistRegistryEntries(entries);
+        await persistRegistryEntries(entries).catch((error) => {
+            console.warn('[watchonly-registry] persist skipped after registry-matched refresh:', (error as Error)?.message || error);
+        });
         return {
             address: normalized.address,
             pubkey: normalized.pubkey,
@@ -573,6 +595,8 @@ async function importWatchOnlyAccount(
             source: options?.source || existing?.source || 'sync-watchonly',
             refreshRequested,
             alreadyTracked: !!existing,
+            pubkey: normalized.pubkey,
+            mappedRpc: 'importpubkey',
         });
         const importedAlready = await alreadyImported(normalized.address);
         if (!importedAlready) {
@@ -580,7 +604,9 @@ async function importWatchOnlyAccount(
             if (importRes.error) {
                 nextEntry.lastError = importRes.error;
                 entries.set(normalized.address, nextEntry);
-                await persistRegistryEntries(entries);
+                await persistRegistryEntries(entries).catch((error) => {
+                    console.warn('[watchonly-registry] persist skipped after import error:', (error as Error)?.message || error);
+                });
                 return {
                     address: normalized.address,
                     pubkey: normalized.pubkey,
@@ -601,6 +627,8 @@ async function importWatchOnlyAccount(
                 address: normalized.address,
                 imported: true,
                 providerNodeId: importRes.providerNodeId || null,
+                pubkey: normalized.pubkey,
+                assignedProviderNodeId: nextEntry.assignedProviderNodeId || null,
             });
         } else {
             nextEntry.importCount = existing?.importCount ?? 0;
@@ -614,7 +642,9 @@ async function importWatchOnlyAccount(
         nextEntry.scanState = nextEntry.scanState || 'imported';
         delete nextEntry.lastError;
         entries.set(normalized.address, nextEntry);
-        await persistRegistryEntries(entries);
+        await persistRegistryEntries(entries).catch((error) => {
+            console.warn('[watchonly-registry] persist skipped after successful import:', (error as Error)?.message || error);
+        });
 
         return {
             address: normalized.address,
@@ -628,7 +658,9 @@ async function importWatchOnlyAccount(
         const message = error?.message || 'Failed to import watch-only account';
         nextEntry.lastError = message;
         entries.set(normalized.address, nextEntry);
-        await persistRegistryEntries(entries);
+        await persistRegistryEntries(entries).catch((persistError) => {
+            console.warn('[watchonly-registry] persist skipped after import failure:', (persistError as Error)?.message || persistError);
+        });
         return {
             address: normalized.address,
             pubkey: normalized.pubkey,
@@ -856,7 +888,9 @@ export async function recordWatchOnlySnapshot(input: {
     };
 
     registry.set(key, next);
-    await persistRegistryEntries(registry);
+    await persistRegistryEntries(registry).catch((error) => {
+        console.warn('[watchonly-registry] persist skipped after snapshot:', (error as Error)?.message || error);
+    });
     return next;
 }
 
