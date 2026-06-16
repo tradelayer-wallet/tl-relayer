@@ -10,6 +10,18 @@ import {
     recordWatchOnlySnapshot,
 } from "../services/watchonly-registry.service";
 
+function getRequestTrace(request: FastifyRequest<any>, route: string): Record<string, unknown> {
+    const headers = request.headers || {};
+    return {
+        route,
+        traceId: String((headers['x-request-id'] as string) || (headers['x-correlation-id'] as string) || '').trim() || null,
+        origin: String((headers.origin as string) || '').trim() || null,
+        referer: String((headers.referer as string) || '').trim() || null,
+        userAgent: String((headers['user-agent'] as string) || '').trim() || null,
+        contentType: String((headers['content-type'] as string) || '').trim() || null,
+    };
+}
+
 export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => {
     fastify.get('/validate/:address', async (request: FastifyRequest<{ Params: { address: string } }>, reply) => {
         try {
@@ -26,10 +38,14 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
         try {
             const { address } = request.params;
             console.log('[portfolio-heartbeat][relayer][route] /address/balance request', {
+                ...getRequestTrace(request, '/address/balance'),
                 address: String(address || '').trim(),
+                sourceEndpoint: 'testnet-api',
+                mappedRpc: 'tl_getallbalancesforaddress',
             });
             const res = await getAddressBalance(address);
             console.log('[portfolio-heartbeat][relayer][route] /address/balance response', {
+                ...getRequestTrace(request, '/address/balance'),
                 address: String(address || '').trim(),
                 hasData: res != null,
                 responseType: Array.isArray(res) ? 'array' : typeof res,
@@ -65,8 +81,11 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
                     ? request.body.accounts
                     : [];
                 console.log('[portfolio-heartbeat][relayer][route] /address/sync-watchonly request', {
+                    ...getRequestTrace(request, '/address/sync-watchonly'),
                     count: accounts.length,
                     addresses: accounts.map((account) => String(account?.address || '').trim()).filter(Boolean),
+                    sourceEndpoint: 'testnet-api',
+                    mappedRpc: 'importpubkey',
                 });
                 const res = await importWatchOnlyAccounts(
                     fastify,
@@ -81,6 +100,7 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
                     reply.status(400).send({ error: res.error });
                 } else {
                     console.log('[portfolio-heartbeat][relayer][route] /address/sync-watchonly response', {
+                        ...getRequestTrace(request, '/address/sync-watchonly'),
                         imported: res.data?.imported ?? 0,
                         refreshed: res.data?.refreshed ?? 0,
                         skipped: res.data?.skipped ?? 0,
@@ -108,8 +128,10 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
             try {
                 const { network, address } = request.query || {};
                 console.log('[portfolio-heartbeat][relayer][route] /address/watchonly request', {
+                    ...getRequestTrace(request, '/address/watchonly'),
                     network: network || null,
                     address: address || null,
+                    sourceEndpoint: 'testnet-api',
                 });
                 const entries = await listWatchOnlyEntries({ network, address });
                 reply.send({
@@ -138,6 +160,7 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
                 const { address } = request.params;
                 const { network } = request.query || {};
                 console.log('[portfolio-heartbeat][relayer][route] /address/watchonly/:address request', {
+                    ...getRequestTrace(request, '/address/watchonly/:address'),
                     address: String(address || '').trim(),
                     network: network || null,
                 });
@@ -166,6 +189,7 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
             try {
                 const { address } = request.params;
                 console.log('[portfolio-heartbeat][relayer][route] /address/watchonly/:address/scan request', {
+                    ...getRequestTrace(request, '/address/watchonly/:address/scan'),
                     address: String(address || '').trim(),
                 });
                 const coverage = await getWatchOnlyCoverage(address);
@@ -196,6 +220,7 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
             try {
                 const body = request.body || {};
                 console.log('[portfolio-heartbeat][relayer][route] /address/watchonly/bootstrap request', {
+                    ...getRequestTrace(request, '/address/watchonly/bootstrap'),
                     sourceUrl: body.sourceUrl || null,
                     network: body.network || null,
                     force: !!body.force,
@@ -228,6 +253,7 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
                 const { address } = request.params;
                 const { network } = request.query || {};
                 console.log('[portfolio-heartbeat][relayer][route] /address/watchonly/:address/verify request', {
+                    ...getRequestTrace(request, '/address/watchonly/:address/verify'),
                     address: String(address || '').trim(),
                     network: network || null,
                 });
@@ -261,6 +287,7 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
             try {
                 const body = request.body || {};
                 console.log('[portfolio-heartbeat][relayer][route] /address/watchonly/scan/run request', {
+                    ...getRequestTrace(request, '/address/watchonly/scan/run'),
                     network: body.network || null,
                     address: body.address || null,
                     fromHeight: body.fromHeight ?? null,
@@ -313,6 +340,7 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
                     return;
                 }
                 console.log('[portfolio-heartbeat][relayer][route] /address/watchonly/snapshot request', {
+                    ...getRequestTrace(request, '/address/watchonly/snapshot'),
                     address: String(body.address || '').trim(),
                     network: body.network || null,
                     hasPubkey: !!body.pubkey,
@@ -361,6 +389,7 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
                     return;
                 }
                 console.log('[portfolio-heartbeat][relayer][route] /address/watchonly/scan request', {
+                    ...getRequestTrace(request, '/address/watchonly/scan'),
                     address: String(body.address || '').trim(),
                     network: body.network || null,
                     hasPubkey: !!body.pubkey,
@@ -401,8 +430,11 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
                 const minBlock = 1;
                 const maxBlock = 99999999;
                 console.log('[portfolio-heartbeat][relayer][route] /address/utxo request', {
+                    ...getRequestTrace(request, '/address/utxo'),
                     address: String(address || '').trim(),
                     hasPubkey: !!pubkey,
+                    sourceEndpoint: 'testnet-api',
+                    mappedRpc: 'listunspent',
                 });
 
                 const res = await listunspent(fastify, [
@@ -413,12 +445,14 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
 
                 if (res.error) {
                     console.warn('[portfolio-heartbeat][relayer][route] /address/utxo failed', {
+                        ...getRequestTrace(request, '/address/utxo'),
                         address: String(address || '').trim(),
                         error: res.error,
                     });
                     reply.status(400).send({ error: res.error });
                 } else {
                     console.log('[portfolio-heartbeat][relayer][route] /address/utxo response', {
+                        ...getRequestTrace(request, '/address/utxo'),
                         address: String(address || '').trim(),
                         count: Array.isArray(res.data) ? res.data.length : 0,
                     });

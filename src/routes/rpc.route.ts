@@ -1,8 +1,7 @@
 import { FastifyInstance } from "fastify";
 import axios from "axios";
 
-import { rpcClient } from "../config/rpc.config";
-import { importPubKey } from "../services/address.service";
+import { callAllocatedRpc, callRpc, importPubKey } from "../services/address.service";
 import { listunspent } from "../services/sochain.service";
 import { ELogType, saveLog } from "../services/utils.service";
 import { Encode } from "../services/txEncoder";
@@ -14,6 +13,7 @@ import { Encode } from "../services/txEncoder";
 export const rpcRoutes = (fastify: FastifyInstance, _opts: any, done: any) => {
   // Explicit routes
   fastify.post("/payload", handlePayload);
+  fastify.post("/allocated/:providerNodeId/:method", handleAllocatedRpc);
   fastify.post("/tl_getAttestations", handleGetAttestations);
   fastify.post("/tl_getChannelColumn", handleGetChannelColumn);
   fastify.post("/tl_listContractSeries", handleListContractSeries);
@@ -176,10 +176,96 @@ function logPortfolioHeartbeat(event: string, details: Record<string, unknown>) 
   console.log(`[portfolio-heartbeat][relayer][rpc-route] ${event}`, details);
 }
 
+function summarizeMethod(method: string, params: any[]): Record<string, unknown> {
+  const normalized = String(method || '').trim().toLowerCase();
+  const first = params?.[0];
+  const second = params?.[1];
+  const third = params?.[2];
+
+  if (normalized === 'listunspent' && third && typeof third === 'object') {
+    return {
+      mappedEndpoint: '/address/utxo',
+      address: String(third.address || '').trim(),
+      hasPubkey: !!third.pubkey,
+      minconf: first,
+      maxconf: second,
+    };
+  }
+
+  if (normalized === 'tl_getallbalancesforaddress') {
+    return {
+      mappedEndpoint: '/address/balance',
+      address: String(first || '').trim(),
+    };
+  }
+
+  if (normalized === 'tl_listproperties') {
+    return { mappedEndpoint: '/token/list' };
+  }
+
+  if (normalized === 'tl_getproperty') {
+    return {
+      mappedEndpoint: '/token/:propid',
+      propid: Number(first),
+    };
+  }
+
+  return { paramsCount: params.length };
+}
+
+async function handleAllocatedRpc(request: any, reply: any) {
+  try {
+    const { providerNodeId, method } = request.params as {
+      providerNodeId?: string;
+      method?: string;
+    };
+    const body = request.body ?? {};
+    const params = Array.isArray(body.params)
+      ? body.params
+      : Array.isArray(body?.params?.params)
+        ? body.params.params
+        : [];
+    const network = typeof body.network === 'string' ? body.network : undefined;
+    const service = typeof body.service === 'string' ? body.service : undefined;
+    const timeoutMs = Number(body.timeoutMs);
+    const preferredProviderNodeId = String(body.preferredProviderNodeId || providerNodeId || '').trim() || undefined;
+
+    if (!method) {
+      reply.code(400).send({ error: "Missing method" });
+      return;
+    }
+
+    console.log('[portfolio-heartbeat][relayer][rpc-route] allocated request', {
+      method,
+      providerNodeId: preferredProviderNodeId || null,
+      network: network || null,
+      service: service || null,
+      paramsCount: params.length,
+    });
+
+    const res = await callAllocatedRpc(method, params, {
+      preferredProviderNodeId,
+      network,
+      service,
+      timeoutMs: Number.isFinite(timeoutMs) ? timeoutMs : undefined,
+    });
+    if (res.error) {
+      reply.code(502).send({ error: res.error });
+      return;
+    }
+    reply.send(res);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("handleAllocatedRpc error:", msg);
+    reply.code(500).send({ error: msg });
+  }
+}
+
 async function handleGenericRpc(request: any, reply: any) {
 logPortfolioHeartbeat('incoming', {
   method: String(request.params?.method || '').trim(),
   contentType: request.headers['content-type'] || null,
+  sourceEndpoint: request.body?.sourceEndpoint || null,
 });
 
   try {
@@ -189,6 +275,18 @@ logPortfolioHeartbeat('incoming', {
       ? request.body.params
       : [];
     const raw = params[0];
+
+    if (
+      normalizedMethod === 'tl_getallbalancesforaddress' ||
+      normalizedMethod === 'tl_listproperties' ||
+      normalizedMethod === 'tl_getproperty'
+    ) {
+      logPortfolioHeartbeat('mapped-request', {
+        method: normalizedMethod,
+        sourceEndpoint: request.body?.sourceEndpoint || null,
+        ...summarizeMethod(normalizedMethod, params),
+      });
+    }
 
     // --- special cases ---
 
@@ -340,9 +438,16 @@ logPortfolioHeartbeat('incoming', {
       return;
     }
 
-    const res = await rpcClient.call(normalizedMethod, ...params);
+    const res = await callRpc(normalizedMethod, ...params);
     if (normalizedMethod === "sendrawtransaction" && res?.data) {
       saveLog(ELogType.TXIDS, res.data);
+    }
+    if (normalizedMethod === 'tl_getallbalancesforaddress' || normalizedMethod === 'tl_listproperties' || normalizedMethod === 'tl_getproperty') {
+      logPortfolioHeartbeat('mapped-response', {
+        method: normalizedMethod,
+        hasData: res?.data != null,
+        hasError: !!res?.error,
+      });
     }
     reply.send(res);
   } catch (err) {

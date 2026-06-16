@@ -15,6 +15,13 @@ export type WatchOnlyAccount = {
 
 type RpcResult = { data?: any; error?: string };
 
+export type AllocatedRpcOptions = {
+    preferredProviderNodeId?: string;
+    service?: string;
+    network?: string;
+    timeoutMs?: number;
+};
+
 const PORTFOLIO_HEARTBEAT_METHODS = new Set([
     'validateaddress',
     'getaddressinfo',
@@ -29,8 +36,163 @@ function trimSlash(value: string): string {
     return String(value || '').replace(/\/+$/, '');
 }
 
+const TRADELAYER_LISTENER_METHODS: Record<string, string> = {
+    tl_getallbalancesforaddress: 'tl_getAllBalancesForAddress',
+    tl_listproperties: 'tl_listProperties',
+    tl_getproperty: 'tl_getProperty',
+    tl_getbalance: 'tl_getBalance',
+    tl_getinfo: 'tl_getInfo',
+    tl_getchannel: 'tl_getChannel',
+    tl_createrawtx_opreturn: 'tl_createrawtx_opreturn',
+    tl_createrawtx_reference: 'tl_createrawtx_reference',
+    tl_decodetransaction: 'tl_decodeTx',
+    tl_getcontractinfo: 'tl_getContractInfo',
+    tl_channelbalanceforcommiter: 'tl_channelBalanceForCommiter',
+    tl_getinitmargin: 'tl_getInitMargin',
+    tl_tokentradehistoryforaddress: 'tl_tokenTradeHistoryForAddress',
+    tl_contracttradehistoryforaddress: 'tl_contractTradeHistoryForAddress',
+    tl_totaltradehistoryforaddress: 'tl_totalTradeHistoryForAddress',
+    tl_listcontractseries: 'tl_listContractSeries',
+    tl_getattestations: 'tl_getAttestations',
+    tl_getchannelcolumn: 'tl_getChannelColumn',
+    tl_gettransaction: 'tl_getTransaction',
+};
+
+function getTradeLayerListenerMethod(method: string): string | undefined {
+    const normalizedMethod = String(method || '').trim().toLowerCase();
+    return TRADELAYER_LISTENER_METHODS[normalizedMethod];
+}
+
+function buildListenerBody(method: string, params: any[]): Record<string, unknown> {
+    const normalizedMethod = String(method || '').trim().toLowerCase();
+    const first = params?.[0];
+
+    if (normalizedMethod === 'tl_getattestations') {
+        return {
+            address: params?.[0],
+            id: params?.[1],
+        };
+    }
+
+    if (normalizedMethod === 'tl_getchannelcolumn') {
+        return {
+            channelAddress: params?.[0],
+            cpAddress: params?.[1],
+        };
+    }
+
+    if (normalizedMethod === 'tl_gettransaction') {
+        return { txid: first };
+    }
+
+    return {
+        params: params.length <= 1 ? first : params,
+    };
+}
+
+async function callTradeLayerListener(method: string, params: any[]): Promise<RpcResult> {
+    const listenerMethod = getTradeLayerListenerMethod(method);
+    if (!listenerMethod) {
+        return rpcClient.call(method, ...params);
+    }
+
+    try {
+        const url = `${trimSlash(envConfig.TL_LISTENER_URL)}/${listenerMethod}`;
+        const res = await axios.post(url, buildListenerBody(method, params), { timeout: 15000 });
+        return { data: res.data };
+    } catch (error: any) {
+        const payload = error?.response?.data;
+        return {
+            error:
+                payload?.error?.message ||
+                payload?.error ||
+                (typeof payload === 'string' ? payload : undefined) ||
+                error?.message ||
+                'TradeLayer listener call failed',
+            statusCode: error?.response?.status,
+        } as RpcResult;
+    }
+}
+
+export async function callAllocatedRpc(
+    method: string,
+    params: any[] = [],
+    options: AllocatedRpcOptions = {},
+): Promise<RpcResult & { providerNodeId?: string }> {
+    if (!useCollatorRpc()) {
+        return callRpc(method, ...params);
+    }
+
+    const providerNodeId = sanitizeProviderNodeId(options.preferredProviderNodeId);
+
+    try {
+        const url = trimSlash(envConfig.COLLATOR_URL);
+        console.log('[portfolio-heartbeat][relayer][rpc-allocated] request', {
+            method,
+            service: options.service || envConfig.COLLATOR_RPC_SERVICE,
+            network: options.network || envConfig.COLLATOR_RPC_NETWORK || null,
+            preferredProviderNodeId: providerNodeId || null,
+            route: '/rpc/route',
+        });
+        const res = await axios.post(
+            `${url}/rpc/route`,
+            {
+                service: options.service || envConfig.COLLATOR_RPC_SERVICE,
+                network: options.network || envConfig.COLLATOR_RPC_NETWORK,
+                method,
+                params,
+                timeoutMs: options.timeoutMs,
+                preferredProviderNodeId: providerNodeId,
+                sourceEndpoint: 'testnet-api',
+            },
+            { timeout: 15000 },
+        );
+
+        const payload: any = res.data || {};
+        if (payload.ok === false) {
+            console.warn('[portfolio-heartbeat][relayer][rpc-allocated] failure', {
+                method,
+                providerNodeId: providerNodeId || null,
+                error: payload?.error?.message || payload?.error || 'Collator RPC failed',
+            });
+            return { error: payload?.error?.message || payload?.error || 'Collator RPC failed' };
+        }
+
+        console.log('[portfolio-heartbeat][relayer][rpc-allocated] response', {
+            method,
+            providerNodeId: payload?.providerNodeId || null,
+            hasData: payload?.result != null || payload?.data != null,
+        });
+
+        return {
+            data: payload?.result ?? payload?.data ?? payload,
+            providerNodeId: typeof payload?.providerNodeId === 'string' && payload.providerNodeId.trim()
+                ? payload.providerNodeId.trim()
+                : undefined,
+        };
+    } catch (error: any) {
+        const payload = error?.response?.data;
+        const message =
+            payload?.error?.message ||
+            payload?.error ||
+            error?.message ||
+            'Collator RPC failed';
+        console.warn('[portfolio-heartbeat][relayer][rpc-allocated] error', {
+            method,
+            providerNodeId: providerNodeId || null,
+            message,
+        });
+        return { error: message };
+    }
+}
+
 function useCollatorRpc(): boolean {
     return !!String(envConfig.COLLATOR_URL || '').trim();
+}
+
+function sanitizeProviderNodeId(providerNodeId?: string): string | undefined {
+    const value = String(providerNodeId || '').trim();
+    return value || undefined;
 }
 
 function isPortfolioHeartbeatRpc(method: string): boolean {
@@ -63,7 +225,9 @@ function summarizePortfolioHeartbeatRpc(method: string, params: any[]): Record<s
         normalizedMethod === 'validateaddress' ||
         normalizedMethod === 'getaddressinfo' ||
         normalizedMethod === 'tl_getallbalancesforaddress' ||
-        normalizedMethod === 'sendtoaddress'
+        normalizedMethod === 'sendtoaddress' ||
+        normalizedMethod === 'tl_getproperty' ||
+        normalizedMethod === 'tl_listproperties'
     ) {
         return { address: String(first || '').trim() };
     }
@@ -77,7 +241,7 @@ export function isCollatorMode(): boolean {
 
 export async function callRpc(method: string, ...params: any[]): Promise<RpcResult> {
     if (!useCollatorRpc()) {
-        return rpcClient.call(method, ...params);
+        return callTradeLayerListener(method, params);
     }
 
     try {
@@ -98,6 +262,7 @@ export async function callRpc(method: string, ...params: any[]): Promise<RpcResu
                 network: envConfig.COLLATOR_RPC_NETWORK,
                 method,
                 params,
+                sourceEndpoint: 'testnet-api',
             },
             { timeout: 15000 },
         );
@@ -150,6 +315,7 @@ export const getAddressBalance = async (address: string) => {
         console.log('[portfolio-heartbeat][relayer][balance] request', {
             address: String(address || '').trim(),
             collatorMode: isCollatorMode(),
+            mappedRpc: 'tl_getallbalancesforaddress',
         });
         const res = await callRpc('tl_getallbalancesforaddress', address);
         if (res.error) {
@@ -182,11 +348,25 @@ export const importPubKey = async (_server: any, params: any[]): Promise<{ data?
         const address = params[1];
         if (!pubkey) throw new Error("Pubkey not provided");
 
+        console.log('[portfolio-heartbeat][relayer][watchonly-import] request', {
+            address: String(address || '').trim(),
+            hasPubkey: !!pubkey,
+            sourceEndpoint: 'testnet-api',
+            mappedRpc: 'importpubkey',
+        });
+
         const res = await upsertWatchOnlyAccounts([
             { address: String(address || '').trim(), pubkey: String(pubkey || '').trim() },
         ]);
         const first = res.results[0];
         if (first?.error) throw new Error(first.error);
+        console.log('[portfolio-heartbeat][relayer][watchonly-import] response', {
+            address: String(address || '').trim(),
+            imported: !!first?.imported,
+            skipped: !!first?.skipped,
+            refreshed: !!first?.refreshed,
+            updated: !!first?.updated,
+        });
         return { data: !!first?.imported };
     } catch (error: unknown) {
         const errorMessage = error instanceof Error ? error.message : "An unexpected error occurred";
@@ -202,6 +382,8 @@ export const importWatchOnlyAccounts = async (
         console.log('[portfolio-heartbeat][relayer][watchonly-sync] request', {
             count: Array.isArray(accounts) ? accounts.length : 0,
             addresses: (accounts || []).map((account) => String(account?.address || '').trim()).filter(Boolean),
+            sourceEndpoint: 'testnet-api',
+            mappedRpc: 'importpubkey',
         });
         const res = await upsertWatchOnlyAccounts(
             (accounts || []).map((account) => ({

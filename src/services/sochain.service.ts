@@ -85,6 +85,8 @@ export const listunspent = async (
             scanSourceNodeId: scanOptions.scanSourceNodeId || null,
             minBlock,
             maxBlock,
+            mappedRpc: 'listunspent',
+            sourceEndpoint: 'testnet-api',
         });
 
         const label = "";
@@ -101,6 +103,7 @@ export const listunspent = async (
             logPortfolioHeartbeat('utxo', 'address-unowned', {
                 address,
                 hasPubkey: !!effectivePubkey,
+                pubkey: effectivePubkey || null,
             });
 
             // Check if the pubkey needs to be imported
@@ -117,6 +120,7 @@ export const listunspent = async (
                     address,
                     imported: !importResult.error,
                     error: importResult.error || null,
+                    pubkey: effectivePubkey,
                 });
 
                 if (importResult.error) {
@@ -133,6 +137,7 @@ export const listunspent = async (
             address,
             hasError: !!luRes.error,
             count: Array.isArray(luRes.data) ? luRes.data.length : 0,
+            pubkey: effectivePubkey || null,
         });
 
         if (luRes.error || !luRes.data) {
@@ -182,6 +187,7 @@ export const listunspent = async (
             count: data.length,
             scannedHeight: Number.isFinite(currentHeight) ? currentHeight : null,
             scanSourceNodeId: scanOptions.scanSourceNodeId || `${os.hostname()}:${process.pid}`,
+            pubkey: effectivePubkey || null,
         });
 
         return { data };
