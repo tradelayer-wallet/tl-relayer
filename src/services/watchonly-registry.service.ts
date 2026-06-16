@@ -43,6 +43,21 @@ export interface WatchOnlyRegistryEntry extends WatchOnlyAccount {
             scriptPubKey?: string;
         }>;
     };
+    lastTokenSnapshot?: {
+        updatedAt: number;
+        scannedHeight?: number | null;
+        scanSourceNodeId?: string | null;
+        balances: Array<{
+            propertyId: string | number;
+            ticker?: string;
+            amount: number;
+            available: number;
+            reserved: number;
+            margin: number;
+            vesting: number;
+            channel: number;
+        }>;
+    };
 }
 
 export interface WatchOnlyRegistrySnapshot {
@@ -233,6 +248,22 @@ function normalizeTxid(value: any): string | null {
     return txid || null;
 }
 
+function normalizeTokenBalance(balance: any) {
+    if (!balance || typeof balance !== 'object') return null;
+    const propertyId = balance.propertyId != null ? String(balance.propertyId) : '';
+    if (!propertyId) return null;
+    return {
+        propertyId,
+        ticker: balance.ticker == null ? undefined : String(balance.ticker),
+        amount: Number(balance.amount || 0),
+        available: Number(balance.available || 0),
+        reserved: Number(balance.reserved || 0),
+        margin: Number(balance.margin || 0),
+        vesting: Number(balance.vesting || 0),
+        channel: Number(balance.channel || 0),
+    };
+}
+
 function normalizeAccount(account: Partial<WatchOnlyAccount> | null | undefined): WatchOnlyAccount | null {
     const address = normalize(String(account?.address || ''));
     const pubkey = normalize(String(account?.pubkey || ''));
@@ -271,6 +302,16 @@ function toEntry(raw: any): WatchOnlyRegistryEntry | null {
             utxos: Array.isArray(raw.lastUtxoSnapshot.utxos) ? raw.lastUtxoSnapshot.utxos : [],
         }
         : undefined;
+    const lastTokenSnapshot = raw?.lastTokenSnapshot && typeof raw.lastTokenSnapshot === 'object'
+        ? {
+            updatedAt: Number(raw.lastTokenSnapshot.updatedAt || now),
+            scannedHeight: normalizeHeight(raw.lastTokenSnapshot.scannedHeight),
+            scanSourceNodeId: raw.lastTokenSnapshot.scanSourceNodeId == null ? undefined : String(raw.lastTokenSnapshot.scanSourceNodeId),
+            balances: Array.isArray(raw.lastTokenSnapshot.balances)
+                ? raw.lastTokenSnapshot.balances.map(normalizeTokenBalance).filter(Boolean)
+                : [],
+        }
+        : undefined;
 
     return {
         address: account.address,
@@ -291,6 +332,7 @@ function toEntry(raw: any): WatchOnlyRegistryEntry | null {
         ...(raw?.scanSourceNodeId == null ? {} : { scanSourceNodeId: String(raw.scanSourceNodeId) }),
         ...(typeof raw?.lastError === 'string' && raw.lastError.trim() ? { lastError: raw.lastError.trim() } : {}),
         ...(lastUtxoSnapshot ? { lastUtxoSnapshot } : {}),
+        ...(lastTokenSnapshot ? { lastTokenSnapshot } : {}),
     };
 }
 
@@ -426,6 +468,9 @@ async function upsertWatchOnlyRegistryEntries(
             ...(entry.lastError || existing?.lastError ? { lastError: entry.lastError || existing?.lastError } : {}),
             ...(entry.lastUtxoSnapshot || existing?.lastUtxoSnapshot
                 ? { lastUtxoSnapshot: entry.lastUtxoSnapshot || existing?.lastUtxoSnapshot }
+                : {}),
+            ...(entry.lastTokenSnapshot || existing?.lastTokenSnapshot
+                ? { lastTokenSnapshot: entry.lastTokenSnapshot || existing?.lastTokenSnapshot }
                 : {}),
         };
 
@@ -729,6 +774,11 @@ export async function loadWatchOnlyRegistrySnapshot(): Promise<WatchOnlyRegistry
     return snapshotFromEntries(entries);
 }
 
+export async function getWatchOnlyRegistryEntry(address: string): Promise<WatchOnlyRegistryEntry | null> {
+    const entries = await getRegistryEntries();
+    return entries.get(normalize(address)) || null;
+}
+
 export async function listWatchOnlyEntries(input?: { network?: string; address?: string }) {
     const snapshot = await loadWatchOnlyRegistrySnapshot();
     const network = normalize(input?.network || envConfig.NETWORK || '').toLowerCase();
@@ -890,6 +940,64 @@ export async function recordWatchOnlySnapshot(input: {
     registry.set(key, next);
     await persistRegistryEntries(registry).catch((error) => {
         console.warn('[watchonly-registry] persist skipped after snapshot:', (error as Error)?.message || error);
+    });
+    return next;
+}
+
+export async function recordWatchOnlyTokenSnapshot(input: {
+    network?: string;
+    address: string;
+    pubkey?: string;
+    balances: Array<{
+        propertyId: string | number;
+        ticker?: string;
+        amount: number;
+        available: number;
+        reserved: number;
+        margin: number;
+        vesting: number;
+        channel: number;
+    }>;
+    scannedHeight?: number | null;
+    scanSourceNodeId?: string | null;
+}) {
+    const registry = await getRegistryEntries();
+    const now = Date.now();
+    const address = normalize(input.address);
+    const pubkey = normalize(input.pubkey || '');
+    if (!address) return null;
+
+    const existing = registry.get(address) || {
+        address,
+        pubkey: pubkey || '',
+        source: 'snapshot',
+        firstSeenAt: now,
+        lastSeenAt: now,
+        lastImportedAt: null,
+        importCount: 0,
+    } as WatchOnlyRegistryEntry;
+
+    const balances = (Array.isArray(input.balances) ? input.balances : [])
+        .map(normalizeTokenBalance)
+        .filter(Boolean);
+
+    const next: WatchOnlyRegistryEntry = {
+        ...existing,
+        address,
+        pubkey: pubkey || existing.pubkey,
+        source: existing.source || 'snapshot',
+        lastSeenAt: now,
+        lastTokenSnapshot: {
+            updatedAt: now,
+            scannedHeight: normalizeHeight(input.scannedHeight),
+            scanSourceNodeId: input.scanSourceNodeId || existing.scanSourceNodeId || null,
+            balances,
+        },
+    };
+
+    registry.set(address, next);
+    await persistRegistryEntries(registry).catch((error) => {
+        console.warn('[watchonly-registry] persist skipped after token snapshot:', (error as Error)?.message || error);
     });
     return next;
 }

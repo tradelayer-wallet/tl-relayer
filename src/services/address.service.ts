@@ -4,7 +4,9 @@ import { rpcClient } from "../config/rpc.config";
 import { ELogType, saveLog } from "./utils.service";
 import {
     reconcileWatchOnlyRegistry,
+    getWatchOnlyRegistryEntry,
     resolveWatchOnlyPubkey,
+    recordWatchOnlyTokenSnapshot,
     upsertWatchOnlyAccounts,
 } from "./watchonly-registry.service";
 
@@ -112,6 +114,54 @@ async function callTradeLayerListener(method: string, params: any[]): Promise<Rp
             statusCode: error?.response?.status,
         } as RpcResult;
     }
+}
+
+async function callLocalRpc(method: string, params: any[]): Promise<RpcResult> {
+    const normalizedMethod = String(method || '').trim().toLowerCase();
+    if (normalizedMethod.startsWith('tl_')) {
+        return callTradeLayerListener(method, params);
+    }
+    return rpcClient.call(method, ...params);
+}
+
+function isHtmlLikeResponse(error: any): boolean {
+    const payload = error?.response?.data;
+    if (typeof payload === 'string') {
+        const trimmed = payload.trim().toLowerCase();
+        return trimmed.startsWith('<!doctype') || trimmed.startsWith('<html') || trimmed.includes('<body');
+    }
+    const message = String(error?.message || '').toLowerCase();
+    return message.includes('unexpected token <') || message.includes('html');
+}
+
+function shouldFallbackToLocalRpc(method: string, error: any): boolean {
+    const normalizedMethod = String(method || '').trim().toLowerCase();
+    if (!PORTFOLIO_HEARTBEAT_METHODS.has(normalizedMethod) && !normalizedMethod.startsWith('tl_')) {
+        return false;
+    }
+
+    const statusCode = Number(error?.response?.status);
+    if ([404, 502, 503, 504].includes(statusCode)) {
+        return true;
+    }
+
+    const payload = error?.response?.data;
+    const payloadString = typeof payload === 'string' ? payload.toLowerCase() : '';
+    const errorMessage = String(
+        payload?.error?.message ||
+        payload?.error ||
+        error?.message ||
+        '',
+    ).toLowerCase();
+
+    return (
+        payloadString.includes('<html') ||
+        payloadString.includes('<!doctype') ||
+        errorMessage.includes('no provider') ||
+        errorMessage.includes('providercount: 0') ||
+        errorMessage.includes('failed to import pubkey') ||
+        isHtmlLikeResponse(error)
+    );
 }
 
 export async function callAllocatedRpc(
@@ -275,7 +325,15 @@ export async function callRpc(method: string, ...params: any[]): Promise<RpcResu
                     error: payload?.error?.message || payload?.error || 'Collator RPC failed',
                 });
             }
-            return { error: payload?.error?.message || payload?.error || 'Collator RPC failed' };
+            const message = payload?.error?.message || payload?.error || 'Collator RPC failed';
+            if (shouldFallbackToLocalRpc(method, { response: { status: payload?.statusCode || 502, data: payload?.error || payload } })) {
+                console.warn('[portfolio-heartbeat][relayer][rpc] fallback-to-local', {
+                    method,
+                    reason: message,
+                });
+                return callLocalRpc(method, params);
+            }
+            return { error: message };
         }
 
         if (isPortfolioHeartbeatRpc(method)) {
@@ -302,6 +360,13 @@ export async function callRpc(method: string, ...params: any[]): Promise<RpcResu
                 message,
             });
         }
+        if (shouldFallbackToLocalRpc(method, error)) {
+            console.warn('[portfolio-heartbeat][relayer][rpc] fallback-to-local', {
+                method,
+                reason: message,
+            });
+            return callLocalRpc(method, params);
+        }
         return { error: message };
     }
 }
@@ -321,14 +386,41 @@ export const getAddressBalance = async (address: string) => {
         if (res.error) {
             throw new Error(res.error);
         }
+        const balances = Array.isArray(res.data) ? res.data : [];
+        await recordWatchOnlyTokenSnapshot({
+            address: String(address || '').trim(),
+            balances: balances.map((token: any) => ({
+                propertyId: token?.propertyId ?? token?.propertyid ?? token?.id ?? token?.propertyID ?? '',
+                ticker: token?.ticker ?? token?.name ?? token?.label ?? '-',
+                amount: Number(token?.amount || 0),
+                available: Number(token?.available || 0),
+                reserved: Number(token?.reserved || 0),
+                margin: Number(token?.margin || 0),
+                vesting: Number(token?.vesting || 0),
+                channel: Number(token?.channel || 0),
+            })),
+        }).catch((error) => {
+            console.warn('[portfolio-heartbeat][relayer][balance] token-snapshot-cache failed', error instanceof Error ? error.message : error);
+        });
         console.log('[portfolio-heartbeat][relayer][balance] response', {
             address: String(address || '').trim(),
             hasData: res.data != null,
             responseType: Array.isArray(res.data) ? 'array' : typeof res.data,
         });
-        return res.data;
+        return balances;
     } catch (error: unknown) {
         const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+        const cached = await getWatchOnlyRegistryEntry(String(address || '').trim());
+        const cachedBalances = cached?.lastTokenSnapshot?.balances || [];
+        if (cachedBalances.length) {
+            console.warn('[portfolio-heartbeat][relayer][balance] returning cached token snapshot', {
+                address: String(address || '').trim(),
+                cachedAt: cached?.lastTokenSnapshot?.updatedAt || null,
+                count: cachedBalances.length,
+                reason: errorMessage,
+            });
+            return cachedBalances;
+        }
         console.error('Error in getAddressBalance:', errorMessage);
         throw new Error(errorMessage);
     }

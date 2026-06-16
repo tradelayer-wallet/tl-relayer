@@ -4,6 +4,7 @@ import { callRpc, getWatchOnlyRegistryPubkey, importPubKey } from "./address.ser
 import { fetchExternalWatchOnlySnapshot } from "./watchonly-external.service";
 import {
     getWatchOnlyCoverage,
+    getWatchOnlyRegistryEntry,
     listWatchOnlyEntries,
     recordWatchOnlySnapshot,
     resolveWatchOnlyRescanStartHeight,
@@ -141,6 +142,25 @@ export const listunspent = async (
         });
 
         if (luRes.error || !luRes.data) {
+            const cachedEntry = await getWatchOnlyRegistryEntry(address);
+            const cachedUtxos = cachedEntry?.lastUtxoSnapshot?.utxos || [];
+            if (cachedUtxos.length) {
+                logPortfolioHeartbeat('utxo', 'listunspent-cache-hit', {
+                    address,
+                    count: cachedUtxos.length,
+                    reason: luRes.error || 'no live utxos payload',
+                    pubkey: effectivePubkey || null,
+                });
+                return {
+                    data: cachedUtxos.map((u: any) => ({
+                        txid: String(u.txid || ''),
+                        amount: Number(u.amount || 0),
+                        confirmations: Number(u.confirmations || 0),
+                        scriptPubKey: u.scriptPubKey,
+                        vout: Number(u.vout || 0),
+                    })),
+                };
+            }
             throw new Error(`listunspent RPC error: ${luRes.error}`);
         }
 
