@@ -1,6 +1,6 @@
 import * as os from 'node:os';
 import { envConfig } from "../config/env.config";
-import { callRpc, getWatchOnlyRegistryPubkey, importPubKey } from "./address.service";
+import { callAllocatedRpc, callRpc, getWatchOnlyRegistryPubkey, importPubKey } from "./address.service";
 import { fetchExternalWatchOnlySnapshot } from "./watchonly-external.service";
 import {
     getWatchOnlyCoverage,
@@ -93,7 +93,10 @@ export const listunspent = async (
         const label = "";
 
         // Validate the address
-        const addressInfo = await callRpc('getaddressinfo', address);
+        const addressInfo = await callAllocatedRpc('getaddressinfo', [address], {
+            service: envConfig.COLLATOR_RPC_SERVICE,
+            network,
+        });
         logPortfolioHeartbeat('utxo', 'address-info', {
             address,
             ismine: !!addressInfo?.data?.ismine,
@@ -133,7 +136,10 @@ export const listunspent = async (
         }
 
         // Attempt to fetch unspent UTXOs using the RPC client
-        const luRes = await callRpc('listunspent', minBlock, maxBlock, [address]);
+        const luRes = await callAllocatedRpc('listunspent', [minBlock, maxBlock, { address, pubkey: effectivePubkey }], {
+            service: envConfig.COLLATOR_RPC_SERVICE,
+            network,
+        });
         logPortfolioHeartbeat('utxo', 'listunspent-result', {
             address,
             hasError: !!luRes.error,
@@ -186,7 +192,10 @@ export const listunspent = async (
                 })
             );
 
-        const chainInfo = await callRpc('getblockchaininfo');
+        const chainInfo = await callAllocatedRpc('getblockchaininfo', [], {
+            service: envConfig.COLLATOR_RPC_SERVICE,
+            network,
+        });
         const currentHeight = Number(chainInfo?.data?.blocks ?? chainInfo?.data?.result?.blocks);
         const firstFunding = deriveFirstFundingScanInfo(data, Number.isFinite(currentHeight) ? currentHeight : null);
 

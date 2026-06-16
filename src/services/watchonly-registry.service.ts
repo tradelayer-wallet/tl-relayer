@@ -572,7 +572,7 @@ async function getCurrentChainHeight(): Promise<number | null> {
 
 async function importWatchOnlyAccount(
     account: WatchOnlyAccount,
-    options?: { source?: string; refresh?: boolean },
+    options?: { source?: string; refresh?: boolean; skipWalletRpc?: boolean; imported?: boolean },
 ): Promise<WatchOnlyImportResult> {
     const normalized = normalizeAccount(account);
     if (!normalized) {
@@ -635,6 +635,24 @@ async function importWatchOnlyAccount(
     };
 
     try {
+        if (options?.skipWalletRpc) {
+            nextEntry.lastImportedAt = now;
+            nextEntry.scanState = nextEntry.scanState || 'imported';
+            delete nextEntry.lastError;
+            entries.set(normalized.address, nextEntry);
+            await persistRegistryEntries(entries).catch((error) => {
+                console.warn('[watchonly-registry] persist skipped after wallet-rpc bypass import:', (error as Error)?.message || error);
+            });
+            return {
+                address: normalized.address,
+                pubkey: normalized.pubkey,
+                imported: !!options?.imported,
+                refreshed: !!existing && !options?.imported,
+                skipped: !!existing && !options?.imported,
+                updated: true,
+            };
+        }
+
         console.log('[portfolio-heartbeat][relayer][registry] import-request', {
             address: normalized.address,
             source: options?.source || existing?.source || 'sync-watchonly',
@@ -1004,7 +1022,7 @@ export async function recordWatchOnlyTokenSnapshot(input: {
 
 export async function upsertWatchOnlyAccounts(
     accounts: WatchOnlyAccount[],
-    options?: { source?: string; refresh?: boolean },
+    options?: { source?: string; refresh?: boolean; skipWalletRpc?: boolean; imported?: boolean },
 ): Promise<WatchOnlySyncSummary> {
     const results: WatchOnlyImportResult[] = [];
     let imported = 0;

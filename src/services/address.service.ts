@@ -245,6 +245,19 @@ function sanitizeProviderNodeId(providerNodeId?: string): string | undefined {
     return value || undefined;
 }
 
+async function resolveWatchOnlyProviderNodeId(address?: string, fallbackPubkey?: string): Promise<string | undefined> {
+    const registryEntry = address ? await getWatchOnlyRegistryEntry(address) : null;
+    const providerNodeId = sanitizeProviderNodeId(
+        registryEntry?.assignedProviderNodeId ||
+        registryEntry?.scanSourceNodeId ||
+        registryEntry?.lastUtxoSnapshot?.scanSourceNodeId ||
+        registryEntry?.lastTokenSnapshot?.scanSourceNodeId ||
+        ''
+    );
+    if (providerNodeId) return providerNodeId;
+    return sanitizeProviderNodeId(fallbackPubkey || '');
+}
+
 function isPortfolioHeartbeatRpc(method: string): boolean {
     return PORTFOLIO_HEARTBEAT_METHODS.has(String(method || '').trim().toLowerCase());
 }
@@ -447,17 +460,38 @@ export const importPubKey = async (_server: any, params: any[]): Promise<{ data?
             mappedRpc: 'importpubkey',
         });
 
+        const normalizedAddress = String(address || '').trim();
+        const normalizedPubkey = String(pubkey || '').trim();
+        const providerNodeId = await resolveWatchOnlyProviderNodeId(normalizedAddress, normalizedPubkey);
+        const allocatedRes = await callAllocatedRpc('importpubkey', [normalizedPubkey, normalizedAddress, false], {
+            preferredProviderNodeId: providerNodeId,
+            service: envConfig.COLLATOR_RPC_SERVICE,
+            network: envConfig.COLLATOR_RPC_NETWORK || envConfig.NETWORK,
+        });
+        if (allocatedRes.error && !useCollatorRpc()) {
+            console.warn('[portfolio-heartbeat][relayer][watchonly-import] allocated rpc unavailable, using registry update only', {
+                address: normalizedAddress,
+                providerNodeId: providerNodeId || null,
+                error: allocatedRes.error,
+            });
+        }
+
         const res = await upsertWatchOnlyAccounts([
-            { address: String(address || '').trim(), pubkey: String(pubkey || '').trim() },
-        ]);
+            { address: normalizedAddress, pubkey: normalizedPubkey },
+        ], {
+            source: 'sync-watchonly',
+            skipWalletRpc: true,
+            imported: !allocatedRes.error,
+        });
         const first = res.results[0];
         if (first?.error) throw new Error(first.error);
         console.log('[portfolio-heartbeat][relayer][watchonly-import] response', {
-            address: String(address || '').trim(),
+            address: normalizedAddress,
             imported: !!first?.imported,
             skipped: !!first?.skipped,
             refreshed: !!first?.refreshed,
             updated: !!first?.updated,
+            providerNodeId: allocatedRes.providerNodeId || providerNodeId || null,
         });
         return { data: !!first?.imported };
     } catch (error: unknown) {
