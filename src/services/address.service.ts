@@ -308,7 +308,7 @@ export function isCollatorMode(): boolean {
 export async function callRpc(method: string, ...params: any[]): Promise<RpcResult> {
     const normalizedMethod = String(method || '').trim().toLowerCase();
     if (!useCollatorRpc()) {
-        if (PORTFOLIO_HEARTBEAT_METHODS.has(normalizedMethod)) {
+        if (PORTFOLIO_HEARTBEAT_METHODS.has(normalizedMethod) || normalizedMethod.startsWith('tl_')) {
             return { error: 'Collator routing unavailable for watch-only RPC' };
         }
         return callTradeLayerListener(method, params);
@@ -346,7 +346,7 @@ export async function callRpc(method: string, ...params: any[]): Promise<RpcResu
                 });
             }
             const message = payload?.error?.message || payload?.error || 'Collator RPC failed';
-            if (shouldFallbackToLocalRpc(method, { response: { status: payload?.statusCode || 502, data: payload?.error || payload } })) {
+            if (shouldFallbackToLocalRpc(method, { response: { status: payload?.statusCode || 502, data: payload?.error || payload } }) && !normalizedMethod.startsWith('tl_')) {
                 console.warn('[portfolio-heartbeat][relayer][rpc] fallback-to-local', {
                     method,
                     reason: message,
@@ -380,7 +380,7 @@ export async function callRpc(method: string, ...params: any[]): Promise<RpcResu
                 message,
             });
         }
-        if (shouldFallbackToLocalRpc(method, error) && !PORTFOLIO_HEARTBEAT_METHODS.has(normalizedMethod)) {
+        if (shouldFallbackToLocalRpc(method, error) && !PORTFOLIO_HEARTBEAT_METHODS.has(normalizedMethod) && !normalizedMethod.startsWith('tl_')) {
             console.warn('[portfolio-heartbeat][relayer][rpc] fallback-to-local', {
                 method,
                 reason: message,

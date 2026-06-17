@@ -4,7 +4,6 @@ import * as path from 'node:path';
 import { randomBytes } from 'node:crypto';
 
 import { envConfig } from '../config/env.config';
-import { rpcClient } from '../config/rpc.config';
 import { ELogType, saveLog } from './utils.service';
 
 export interface WatchOnlyAccount {
@@ -163,7 +162,7 @@ function summarizePortfolioHeartbeatRpc(method: string, params: any[]): Record<s
 
 async function callRpc(method: string, ...params: any[]): Promise<{ data?: any; error?: string; providerNodeId?: string }> {
     if (!useCollatorRpc()) {
-        return rpcClient.call(method, ...params);
+        return { error: 'Collator routing unavailable for watch-only RPC' };
     }
 
     try {
@@ -230,12 +229,12 @@ async function callRpc(method: string, ...params: any[]): Promise<{ data?: any; 
     }
 }
 
-function getRegistryPath(): string {
-    return String(envConfig.WATCHONLY_REGISTRY_PATH || DEFAULT_REGISTRY_PATH).trim() || DEFAULT_REGISTRY_PATH;
-}
-
 function normalize(value: string): string {
     return String(value || '').trim();
+}
+
+function getRegistryPath(): string {
+    return String(envConfig.WATCHONLY_REGISTRY_PATH || DEFAULT_REGISTRY_PATH).trim() || DEFAULT_REGISTRY_PATH;
 }
 
 function normalizeHeight(value: any): number | null {
@@ -560,14 +559,24 @@ export async function bootstrapWatchOnlyRegistryFromSeed(input?: {
 }
 
 async function alreadyImported(address: string): Promise<boolean> {
-    const addressInfo = await callRpc('getaddressinfo', address);
-    return !!addressInfo?.data?.ismine || !!addressInfo?.data?.iswatchonly;
+    const entries = await getRegistryEntries();
+    const entry = entries.get(normalize(address));
+    return !!entry?.lastImportedAt || !!entry?.lastUtxoSnapshot || !!entry?.lastTokenSnapshot;
 }
 
 async function getCurrentChainHeight(): Promise<number | null> {
-    const chainInfo = await callRpc('getblockchaininfo');
-    const height = chainInfo?.data?.blocks ?? chainInfo?.data?.result?.blocks;
-    return normalizeHeight(height);
+    const entries = await getRegistryEntries();
+    const heights: number[] = [];
+    for (const entry of Array.from(entries.values())) {
+        const candidates = [
+            normalizeHeight(entry.lastSnapshotHeight),
+            normalizeHeight(entry.lastScannedHeight),
+            normalizeHeight(entry.firstFundingHeight),
+        ].filter((value): value is number => Number.isFinite(Number(value)) && Number(value) >= 0);
+        heights.push(...candidates);
+    }
+    if (!heights.length) return null;
+    return Math.max(...heights);
 }
 
 async function importWatchOnlyAccount(
