@@ -1,6 +1,7 @@
 import * as bitcoin from 'bitcoinjs-lib';
 import axios from 'axios';
 import { rpcClient } from "../config/rpc.config";  // Your configured RPC client
+import { getWatchOnlyRegistryEntry } from './watchonly-registry.service';
 
 /********************************************************************
  * Type Definitions (adjust as needed in your environment)
@@ -121,6 +122,30 @@ const networkMap: Record<string, bitcoin.Network> = {
 
 // Note: If you have a global fastifyServer instance, you can adapt this.
 const relayerApiUrl = process.env.RELAYER_API_URL || null;
+const WEB_FIRST_RPC_METHODS = new Set([
+  'listunspent',
+  'getaddressinfo',
+  'decoderawtransaction',
+  'createrawtransaction',
+  'walletcreatefundedpsbt',
+  'sendrawtransaction',
+]);
+
+function normalizeMethodName(method: string): string {
+  return String(method || '').trim().toLowerCase();
+}
+
+async function getCachedWatchOnlyUtxos(address: string): Promise<IUTXO[]> {
+  const entry = await getWatchOnlyRegistryEntry(address);
+  const utxos = entry?.lastUtxoSnapshot?.utxos || [];
+  return utxos.map((utxo: any) => ({
+    txid: String(utxo.txid || ''),
+    amount: Number(utxo.amount || 0),
+    confirmations: Number(utxo.confirmations || 0),
+    scriptPubKey: String(utxo.scriptPubKey || ''),
+    vout: Number(utxo.vout || 0),
+  })).filter((utxo: IUTXO) => !!utxo.txid);
+}
 
 /**
  * Generic function for making RPC calls. 
@@ -131,13 +156,34 @@ export const smartRpc: TClient = async (
   params: any[] = [],
   api = false
 ) => {
-  if (rpcClient && !api) {
+  const normalizedMethod = normalizeMethodName(method);
+  const webFirst = WEB_FIRST_RPC_METHODS.has(normalizedMethod);
+
+  if ((rpcClient && !api && !webFirst)) {
     return await rpcClient.call(method, ...params);
   } else {
     if (relayerApiUrl) {
       const url = `${relayerApiUrl}/rpc/${method}`;
-      return axios.post(url, { params }).then((res) => res.data);
+      try {
+        const res = await axios.post(url, { params });
+        return res.data;
+      } catch (error: any) {
+        if (normalizedMethod === 'listunspent') {
+          const filter = params?.[2];
+          const address = String(filter?.address || '').trim();
+          if (address) {
+            const cached = await getCachedWatchOnlyUtxos(address);
+            if (cached.length) {
+              return { data: cached };
+            }
+          }
+        }
+        throw error;
+      }
     } else {
+      if (webFirst) {
+        return { error: `Relayer API url not found for ${method}` };
+      }
       return { error: `Relayer API url not found` };
     }
   }
@@ -609,9 +655,9 @@ export const getTx = async (txid: string) => {
 export const broadcastTx = async (rawTx: string) => {
   console.log('rawtx in broadcast ' +rawTx)
   try {
-    const result = await rpcClient.call("sendrawtransaction", rawTx);
+    const result = await smartRpc("sendrawtransaction", [rawTx], true);
     console.log('result of tx send '+JSON.stringify(result)) 
-    return { txid: result };
+    return { txid: result?.data || result };
   } catch (error: unknown) {
     const errorMessage = error instanceof Error 
       ? error.message 
