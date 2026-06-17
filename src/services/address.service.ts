@@ -169,7 +169,11 @@ export async function callAllocatedRpc(
     params: any[] = [],
     options: AllocatedRpcOptions = {},
 ): Promise<RpcResult & { providerNodeId?: string }> {
+    const normalizedMethod = String(method || '').trim().toLowerCase();
     if (!useCollatorRpc()) {
+        if (PORTFOLIO_HEARTBEAT_METHODS.has(normalizedMethod) || normalizedMethod.startsWith('tl_')) {
+            return { error: 'Collator routing unavailable for watch-only RPC' };
+        }
         return callRpc(method, ...params);
     }
 
@@ -245,7 +249,7 @@ function sanitizeProviderNodeId(providerNodeId?: string): string | undefined {
     return value || undefined;
 }
 
-async function resolveWatchOnlyProviderNodeId(address?: string, fallbackPubkey?: string): Promise<string | undefined> {
+async function resolveWatchOnlyProviderNodeId(address?: string): Promise<string | undefined> {
     const registryEntry = address ? await getWatchOnlyRegistryEntry(address) : null;
     const providerNodeId = sanitizeProviderNodeId(
         registryEntry?.assignedProviderNodeId ||
@@ -254,8 +258,7 @@ async function resolveWatchOnlyProviderNodeId(address?: string, fallbackPubkey?:
         registryEntry?.lastTokenSnapshot?.scanSourceNodeId ||
         ''
     );
-    if (providerNodeId) return providerNodeId;
-    return sanitizeProviderNodeId(fallbackPubkey || '');
+    return providerNodeId || undefined;
 }
 
 function isPortfolioHeartbeatRpc(method: string): boolean {
@@ -303,7 +306,11 @@ export function isCollatorMode(): boolean {
 }
 
 export async function callRpc(method: string, ...params: any[]): Promise<RpcResult> {
+    const normalizedMethod = String(method || '').trim().toLowerCase();
     if (!useCollatorRpc()) {
+        if (PORTFOLIO_HEARTBEAT_METHODS.has(normalizedMethod)) {
+            return { error: 'Collator routing unavailable for watch-only RPC' };
+        }
         return callTradeLayerListener(method, params);
     }
 
@@ -373,7 +380,7 @@ export async function callRpc(method: string, ...params: any[]): Promise<RpcResu
                 message,
             });
         }
-        if (shouldFallbackToLocalRpc(method, error)) {
+        if (shouldFallbackToLocalRpc(method, error) && !PORTFOLIO_HEARTBEAT_METHODS.has(normalizedMethod)) {
             console.warn('[portfolio-heartbeat][relayer][rpc] fallback-to-local', {
                 method,
                 reason: message,
@@ -462,7 +469,7 @@ export const importPubKey = async (_server: any, params: any[]): Promise<{ data?
 
         const normalizedAddress = String(address || '').trim();
         const normalizedPubkey = String(pubkey || '').trim();
-        const providerNodeId = await resolveWatchOnlyProviderNodeId(normalizedAddress, normalizedPubkey);
+        const providerNodeId = await resolveWatchOnlyProviderNodeId(normalizedAddress);
         const allocatedRes = await callAllocatedRpc('importpubkey', [normalizedPubkey, normalizedAddress, false], {
             preferredProviderNodeId: providerNodeId,
             service: envConfig.COLLATOR_RPC_SERVICE,
