@@ -6,6 +6,7 @@ import {
     getWatchOnlyCoverage,
     getWatchOnlyRegistryEntry,
     listWatchOnlyEntries,
+    recordTradeLayerRpcSnapshot,
     recordWatchOnlySnapshot,
     resolveWatchOnlyRescanStartHeight,
     upsertWatchOnlyEntry,
@@ -159,6 +160,7 @@ export const listunspent = async (
                 });
                 return {
                     data: cachedUtxos.map((u: any) => ({
+                        id: String(u.id || `${String(u.txid || '')}:${Number(u.vout || 0)}`),
                         txid: String(u.txid || ''),
                         amount: Number(u.amount || 0),
                         confirmations: Number(u.confirmations || 0),
@@ -178,12 +180,14 @@ export const listunspent = async (
             )
             .map(
                 (u: {
+                    id?: string;
                     txid: string;
                     amount: number;
                     confirmations: number;
                     scriptPubKey: string;
                     vout: number;
                 }) => ({
+                    id: String(u.id || `${u.txid}:${u.vout}`),
                     txid: u.txid,
                     amount: u.amount,
                     confirmations: u.confirmations,
@@ -209,6 +213,22 @@ export const listunspent = async (
             firstFundingTxid: firstFunding.firstFundingTxid,
             scanState: scanOptions.scanState || 'live',
             scanSourceNodeId: scanOptions.scanSourceNodeId || `${os.hostname()}:${process.pid}`,
+        });
+
+        await recordTradeLayerRpcSnapshot({
+            method: 'listunspent',
+            route: '/address/utxo',
+            address,
+            network,
+            sourceEndpoint: 'testnet-api',
+            providerNodeId: scanOptions.scanSourceNodeId || `${os.hostname()}:${process.pid}`,
+            summary: {
+                count: data.length,
+                scannedHeight: Number.isFinite(currentHeight) ? currentHeight : null,
+            },
+            payload: data,
+        }).catch((error) => {
+            console.warn('[portfolio-heartbeat][relayer][utxo] rpc-state snapshot failed', error instanceof Error ? error.message : error);
         });
 
         logPortfolioHeartbeat('utxo', 'snapshot-recorded', {

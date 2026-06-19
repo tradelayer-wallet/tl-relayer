@@ -2,6 +2,7 @@ import * as bitcoin from 'bitcoinjs-lib';
 import axios from 'axios';
 import { rpcClient } from "../config/rpc.config";  // Your configured RPC client
 import { getWatchOnlyRegistryEntry } from './watchonly-registry.service';
+import { callRpc } from './address.service';
 
 /********************************************************************
  * Type Definitions (adjust as needed in your environment)
@@ -127,12 +128,53 @@ const WEB_FIRST_RPC_METHODS = new Set([
   'getaddressinfo',
   'decoderawtransaction',
   'createrawtransaction',
-  'walletcreatefundedpsbt',
   'sendrawtransaction',
 ]);
 
 function normalizeMethodName(method: string): string {
   return String(method || '').trim().toLowerCase();
+}
+
+function inferNetworkFromOutputs(outputs: Record<string, number | string>): string {
+  const addresses = Object.keys(outputs || {}).filter((key) => key !== 'data');
+  const first = addresses[0] || '';
+  if (first.startsWith('tltc')) return 'LTCTEST';
+  if (first.startsWith('ltc')) return 'LTC';
+  if (first.startsWith('tb')) return 'BTCTEST';
+  return 'BTC';
+}
+
+function createRawTransactionHex(
+  inputs: Array<{ txid: string; vout: number; sequence?: number }>,
+  outputs: Record<string, number | string>,
+  networkName?: string,
+): string {
+  const network = networks[networkName || inferNetworkFromOutputs(outputs)];
+  const tx = new bitcoin.Transaction();
+
+  for (const input of inputs || []) {
+    if (!input?.txid && input?.txid !== '') {
+      throw new Error('Missing transaction input txid');
+    }
+    tx.addInput(
+      Buffer.from(String(input.txid), 'hex').reverse(),
+      Number(input.vout),
+      input.sequence,
+    );
+  }
+
+  for (const [address, amount] of Object.entries(outputs || {})) {
+    if (address === 'data') {
+      const embed = bitcoin.payments.embed({ data: [Buffer.from(String(amount), 'hex')] });
+      if (!embed.output) throw new Error('Failed to build OP_RETURN output');
+      tx.addOutput(embed.output, 0);
+      continue;
+    }
+    const script = bitcoin.address.toOutputScript(address, network);
+    tx.addOutput(script, Math.round(Number(amount) * 1e8));
+  }
+
+  return tx.toHex();
 }
 
 async function getCachedWatchOnlyUtxos(address: string): Promise<IUTXO[]> {
@@ -158,6 +200,33 @@ export const smartRpc: TClient = async (
 ) => {
   const normalizedMethod = normalizeMethodName(method);
   const webFirst = WEB_FIRST_RPC_METHODS.has(normalizedMethod);
+
+  if (normalizedMethod === 'createrawtransaction') {
+    return {
+      data: createRawTransactionHex(params?.[0] || [], params?.[1] || {}, params?.[2]),
+    };
+  }
+
+  if (normalizedMethod === 'decoderawtransaction') {
+    const tx = bitcoin.Transaction.fromHex(String(params?.[0] || ''));
+    return {
+      data: {
+        txid: tx.getId(),
+        hash: tx.getHash().reverse().toString('hex'),
+        size: tx.byteLength(),
+        vin: tx.ins.map((input) => ({
+          txid: Buffer.from(input.hash).reverse().toString('hex'),
+          vout: input.index,
+          sequence: input.sequence,
+        })),
+        vout: tx.outs.map((output, index) => ({
+          n: index,
+          value: safeNumber(output.value / 1e8),
+          scriptPubKey: output.script.toString('hex'),
+        })),
+      },
+    };
+  }
 
   if ((rpcClient && !api && !webFirst)) {
     return await rpcClient.call(method, ...params);
@@ -193,8 +262,7 @@ export const smartRpc: TClient = async (
  * Example: local Express/Node service for Omni/LTC/BTC calls, if any
  */
 export const jsTlApi: TClient = async (method: string, params: any[] = []) => {
-  const url = `http://localhost:3001/${method}`;
-  return axios.post(url, { params }).then((res) => res.data);
+  return callRpc(method, ...params);
 };
 
 /********************************************************************
@@ -390,75 +458,37 @@ export const buildTx = async (txConfig: IBuildTxConfig, isApiMode: boolean) => {
       throw new Error('Not enough inputs to cover the amount + fee');
     }
 
-    // 3) Build "inputs" and "outputs" for walletcreatefundedpsbt
-    //    Even though we have finalInputs, we pass them to the node to ensure it only uses those.
-    //    The node can still add a change output automatically if needed.
-    //    We'll specify outputs as well.
-
-    // Final outputs (address => amountInBTC) 
-    // Must be in BTC if your node is set up that way. Or if your node expects satoshis, adjust accordingly.
     const sendAmountBtc = safeNumber(amount! - fee);
     const outputs: Record<string, number| string> = {
       [toAddress]: sendAmountBtc, 
     };
 
-    // 4) If you have a payload (OP_RETURN), we can add a "data" output in the same outputs array.
-    //    The node interprets { data: <hexstring> } as an OP_RETURN output.
-    //    We have to supply the data in hex. Let's do that:
-   if (payload) {
-  const dataHex = Buffer.from(payload, 'utf8').toString('hex');
-  outputs.data = dataHex;  // now valid, because 'data' can be a string
-}
-
-    // 5) Convert finalInputs into the format "walletcreatefundedpsbt" expects:
-    //    An array of { "txid": string, "vout": number, "sequence"?: number }
     const psbtInputs = finalInputs.map(inp => ({
       txid: inp.txid,
       vout: inp.vout,
     }));
 
-    // 6) Call walletcreatefundedpsbt
-    //    The 3rd param is locktime (0 = none). 
-    //    The 4th param is options. 
-    //    The 5th param is bip32derivs (usually true if you want BIP32 derivation info).
-    const wcfpRes = await smartRpc(
-      'walletcreatefundedpsbt', 
-      [ psbtInputs, outputs, 0, { 
-          // If you want to specify a custom change address:
-          // "changeAddress": fromAddress,
-          // "includeWatching": true,
-          // "feeRate": 0.00001000,  // example fee rate in BTC/kvB
-        }, 
-        true 
-      ], 
-      isApiMode
-    );
+    const rawTx = createRawTransactionHex(psbtInputs, outputs, network);
+    const psbtBuildResult = buildPsbt({
+      rawtx: rawTx,
+      inputs: finalInputs,
+      network: network || 'LTCTEST',
+      payload,
+    });
 
-    if (wcfpRes.error || !wcfpRes.data) {
-      throw new Error(`walletcreatefundedpsbt: ${wcfpRes.error || 'no data'}`);
+    if (psbtBuildResult.error || !psbtBuildResult.data) {
+      throw new Error(`buildPsbt: ${psbtBuildResult.error || 'no data'}`);
     }
-
-    // The result typically includes { psbt: "base64string", fee: X, changePos: Y }
-    const { psbt: psbtBase64, fee: actualFee, changePos } = wcfpRes.data;
-
-    // 7) Optionally finalize with buildPsbt? Or just return the base64 from the node.
-    //    If you want to modify the PSBT further in Node.js, you can do:
-    // const psbtObj = Psbt.fromBase64(psbtBase64, { network: networkMap[network!] });
-    // psbtObj.addSomething()...   // But usually it's fully formed for signing.
 
     // 8) Prepare the response
     const data: any = {
-      // rawtx is not needed if you're doing PSBT flow, but let's keep consistency:
-      rawtx: psbtBase64,  // This is actually a PSBT base64
+      rawtx: rawTx,
       inputs: finalInputs,
+      psbt: psbtBuildResult.data,
     };
 
-    // If the user wants a separate PSBT output (maybe in hex?), we can do:
-    if (addPsbt) {
-      // They might want it as hex. Convert from base64 to hex:
-      const psbtBuf = Buffer.from(psbtBase64, 'base64');
-      const psbtHex = psbtBuf.toString('hex');
-      data.psbt = psbtHex;
+    if (!addPsbt) {
+      delete data.psbt;
     }
 
     return { data };
@@ -644,7 +674,10 @@ export const buildTradeTx = async (tradeConfig: IBuildLTCITTxConfig) => {
 
 export const getTx = async (txid: string) => {
   try {
-    const res = await axios.post('http://localhost:3000/tl_getTransaction', { txid });
+    const res = await callRpc('tl_gettransaction', txid);
+    if (res.error) {
+      throw new Error(res.error);
+    }
     return res.data;
   } catch (error) {
     console.error('Error in getTx:', error);

@@ -1,8 +1,7 @@
 import { FastifyInstance } from "fastify";
-import axios from "axios";
-
 import { callAllocatedRpc, callRpc, importPubKey } from "../services/address.service";
 import { listunspent } from "../services/sochain.service";
+import { recordTradeLayerRpcSnapshot } from "../services/watchonly-registry.service";
 import { ELogType, saveLog } from "../services/utils.service";
 import { Encode } from "../services/txEncoder";
 
@@ -70,10 +69,17 @@ async function handleListContractSeries(request: any, reply: any) {
       return;
     }
 
-    const res = await axios.post(
-      "http://localhost:3000/tl_listContractSeries",
-      { contractId }
-    );
+    const res = await callRpc('tl_listcontractseries', { contractId });
+    if (res.error) {
+      reply.code(502).send({ error: res.error });
+      return;
+    }
+    await recordRouteTradeLayerState({
+      method: 'tl_listContractSeries',
+      payload: res.data,
+      summary: { contractId },
+      route: '/tl_listContractSeries',
+    });
     reply.send(res.data);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -94,10 +100,18 @@ async function handleGetAttestations(request: any, reply: any) {
       return;
     }
 
-    const res = await axios.post(
-      "http://localhost:3000/tl_getAttestations",
-      { address, id }
-    );
+    const res = await callRpc('tl_getattestations', address, id);
+    if (res.error) {
+      reply.code(502).send({ error: res.error });
+      return;
+    }
+    await recordRouteTradeLayerState({
+      method: 'tl_getAttestations',
+      payload: res.data,
+      address,
+      summary: { id },
+      route: '/tl_getAttestations',
+    });
     reply.send(res.data);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -118,10 +132,18 @@ async function handleGetChannelColumn(request: any, reply: any) {
       return;
     }
 
-    const res = await axios.post(
-      "http://localhost:3000/tl_getChannelColumn",
-      { myAddr, cpAddr }
-    );
+    const res = await callRpc('tl_getchannelcolumn', myAddr, cpAddr);
+    if (res.error) {
+      reply.code(502).send({ error: res.error });
+      return;
+    }
+    await recordRouteTradeLayerState({
+      method: 'tl_getChannelColumn',
+      payload: res.data,
+      address: myAddr,
+      summary: { cpAddr },
+      route: '/tl_getChannelColumn',
+    });
     reply.send(res.data);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -136,11 +158,17 @@ async function handleGetChannelColumn(request: any, reply: any) {
 
 const allowedMethods = [
   "tl_getallbalancesforaddress",
+  "tl_getstatesnapshot",
   "tl_listproperties",
   "tl_getproperty",
   "tl_list_attestation",
   "tl_getbalance",
   "tl_getinfo",
+  "tl_getclearlistbyid",
+  "tl_gettransaction",
+  "tl_listcontractseries",
+  "tl_getattestations",
+  "tl_getchannelcolumn",
   "tl_createrawtx_opreturn",
   "tl_createrawtx_reference",
   "tl_check_kyc",
@@ -164,16 +192,45 @@ const allowedMethods = [
   "tl_getChannel",
   "tl_getInitMargin",
   "tl_getContractInfo",
-  "createrawtransaction",
   "sendrawtransaction",
-  "decoderawtransaction",
   "validateaddress",
   "addmultisigaddress",
   "getrawmempool",
-];
+].map((method) => method.toLowerCase());
 
 function logPortfolioHeartbeat(event: string, details: Record<string, unknown>) {
   console.log(`[portfolio-heartbeat][relayer][rpc-route] ${event}`, details);
+}
+
+async function recordRouteTradeLayerState(input: {
+  method: string;
+  payload: unknown;
+  address?: string | null;
+  providerNodeId?: string | null;
+  network?: string | null;
+  sourceEndpoint?: string | null;
+  route?: string | null;
+  summary?: Record<string, unknown>;
+}) {
+  const method = String(input.method || '').trim().toLowerCase();
+  if (!method.startsWith('tl_') && method !== 'listunspent') {
+    return;
+  }
+  await recordTradeLayerRpcSnapshot({
+    method,
+    payload: input.payload,
+    address: input.address || null,
+    providerNodeId: input.providerNodeId || null,
+    network: input.network || null,
+    sourceEndpoint: input.sourceEndpoint || null,
+    route: input.route || '/rpc/route',
+    summary: input.summary || {},
+  }).catch((error) => {
+    console.warn('[portfolio-heartbeat][relayer][rpc-route] state snapshot failed', {
+      method,
+      error: error instanceof Error ? error.message : error,
+    });
+  });
 }
 
 function summarizeMethod(method: string, params: any[]): Record<string, unknown> {
@@ -320,6 +377,19 @@ logPortfolioHeartbeat('incoming', {
         hasError: !!res?.error,
         count: Array.isArray(res?.data) ? res.data.length : 0,
       });
+      if (!res?.error) {
+        await recordRouteTradeLayerState({
+          method: 'listunspent',
+          payload: res.data,
+          address: String(filter?.address || '').trim(),
+          summary: {
+            minconf,
+            maxconf,
+            count: Array.isArray(res.data) ? res.data.length : 0,
+          },
+          route: '/address/utxo',
+        });
+      }
       reply.send(res);
       return;
     }
@@ -331,10 +401,17 @@ logPortfolioHeartbeat('incoming', {
         reply.code(400).send({ error: "Invalid contractId" });
         return;
       }
-      const res = await axios.get(
-        "http://localhost:3000/tl_getContractInfo",
-        { params: { contractId } }
-      );
+      const res = await callRpc('tl_getcontractinfo', { contractId });
+      if (res.error) {
+        reply.code(502).send({ error: res.error });
+        return;
+      }
+      await recordRouteTradeLayerState({
+        method: 'tl_getContractInfo',
+        payload: res.data,
+        summary: { contractId },
+        route: '/tl_getContractInfo',
+      });
       reply.send(res.data);
       return;
     }
@@ -353,12 +430,18 @@ logPortfolioHeartbeat('incoming', {
         return;
       }
 
-      const res = await axios.get(
-        "http://localhost:3000/tl_channelBalanceForCommiter",
-        {
-          params: { address, propertyId },
-        }
-      );
+      const res = await callRpc('tl_channelbalanceforcommiter', address, propertyId);
+      if (res.error) {
+        reply.code(502).send({ error: res.error });
+        return;
+      }
+      await recordRouteTradeLayerState({
+        method: 'tl_channelBalanceForCommiter',
+        payload: res.data,
+        address,
+        summary: { propertyId },
+        route: '/tl_channelBalanceForCommiter',
+      });
       logPortfolioHeartbeat('tl_channelbalanceforcommiter-response', {
         address: String(address || '').trim(),
         hasData: !!res?.data,
@@ -378,10 +461,17 @@ logPortfolioHeartbeat('incoming', {
           .send({ error: "Invalid contractId or price" });
         return;
       }
-      const res = await axios.get(
-        "http://localhost:3000/tl_getInitMargin",
-        { params: { contractId, price } }
-      );
+      const res = await callRpc('tl_getinitmargin', { contractId, price });
+      if (res.error) {
+        reply.code(502).send({ error: res.error });
+        return;
+      }
+      await recordRouteTradeLayerState({
+        method: 'tl_getInitMargin',
+        payload: res.data,
+        summary: { contractId, price },
+        route: '/tl_getInitMargin',
+      });
       reply.send(res.data);
       return;
     }
@@ -394,10 +484,18 @@ logPortfolioHeartbeat('incoming', {
         reply.code(400).send({ error: "Invalid propertyId1, propertyId2, or address" });
         return;
       }
-      const res = await axios.get(
-        "http://localhost:3000/tl_tokenTradeHistoryForAddress",
-        { params: { propertyId1, propertyId2, address } }
-      );
+      const res = await callRpc('tl_tokentradehistoryforaddress', propertyId1, propertyId2, address);
+      if (res.error) {
+        reply.code(502).send({ error: res.error });
+        return;
+      }
+      await recordRouteTradeLayerState({
+        method: 'tl_tokenTradeHistoryForAddress',
+        payload: res.data,
+        address,
+        summary: { propertyId1, propertyId2 },
+        route: '/tl_tokenTradeHistoryForAddress',
+      });
       reply.send(res.data);
       return;
     }
@@ -409,10 +507,18 @@ logPortfolioHeartbeat('incoming', {
         reply.code(400).send({ error: "Invalid contractId or address" });
         return;
       }
-      const res = await axios.get(
-        "http://localhost:3000/tl_contractTradeHistoryForAddress",
-        { params: { contractId, address } }
-      );
+      const res = await callRpc('tl_contracttradehistoryforaddress', contractId, address);
+      if (res.error) {
+        reply.code(502).send({ error: res.error });
+        return;
+      }
+      await recordRouteTradeLayerState({
+        method: 'tl_contractTradeHistoryForAddress',
+        payload: res.data,
+        address,
+        summary: { contractId },
+        route: '/tl_contractTradeHistoryForAddress',
+      });
       reply.send(res.data);
       return;
     }
@@ -423,10 +529,17 @@ logPortfolioHeartbeat('incoming', {
         reply.code(400).send({ error: "Invalid address" });
         return;
       }
-      const res = await axios.get(
-        "http://localhost:3000/tl_totalTradeHistoryForAddress",
-        { params: { address } }
-      );
+      const res = await callRpc('tl_totaltradehistoryforaddress', address);
+      if (res.error) {
+        reply.code(502).send({ error: res.error });
+        return;
+      }
+      await recordRouteTradeLayerState({
+        method: 'tl_totalTradeHistoryForAddress',
+        payload: res.data,
+        address,
+        route: '/tl_totalTradeHistoryForAddress',
+      });
       reply.send(res.data);
       return;
     }
@@ -447,6 +560,17 @@ logPortfolioHeartbeat('incoming', {
         method: normalizedMethod,
         hasData: res?.data != null,
         hasError: !!res?.error,
+      });
+    }
+    if (!res?.error && (normalizedMethod.startsWith('tl_') || normalizedMethod === 'listunspent')) {
+      await recordRouteTradeLayerState({
+        method: normalizedMethod,
+        payload: res.data,
+        address: typeof params?.[0] === 'string' ? String(params[0]).trim() : undefined,
+        route: `/rpc/${normalizedMethod}`,
+        summary: {
+          paramsCount: params.length,
+        },
       });
     }
     reply.send(res);

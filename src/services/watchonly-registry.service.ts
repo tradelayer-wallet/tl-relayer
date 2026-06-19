@@ -35,6 +35,7 @@ export interface WatchOnlyRegistryEntry extends WatchOnlyAccount {
         scannedHeight?: number | null;
         scanSourceNodeId?: string | null;
         utxos: Array<{
+            id: string;
             txid: string;
             vout: number;
             amount: number;
@@ -59,10 +60,27 @@ export interface WatchOnlyRegistryEntry extends WatchOnlyAccount {
     };
 }
 
+export interface TradeLayerMethodSnapshot {
+    updatedAt: number;
+    route?: string | null;
+    address?: string | null;
+    providerNodeId?: string | null;
+    network?: string | null;
+    sourceEndpoint?: string | null;
+    summary?: Record<string, unknown>;
+    payload: unknown;
+}
+
+export interface TradeLayerStateSnapshot {
+    updatedAt: number;
+    byMethod: Record<string, TradeLayerMethodSnapshot>;
+}
+
 export interface WatchOnlyRegistrySnapshot {
     path: string;
     generatedAt: number;
     entries: WatchOnlyRegistryEntry[];
+    tradeLayerState?: TradeLayerStateSnapshot;
 }
 
 export interface WatchOnlyImportResult {
@@ -104,6 +122,7 @@ const DEFAULT_RECONCILE_INTERVAL_MS = 5 * 60 * 1000;
 let registryCache: Map<string, WatchOnlyRegistryEntry> | null = null;
 let registryLoadPromise: Promise<Map<string, WatchOnlyRegistryEntry>> | null = null;
 let reconcileInFlight = false;
+let tradeLayerStateCache: TradeLayerStateSnapshot | null = null;
 
 const PORTFOLIO_HEARTBEAT_METHODS = new Set([
     'getaddressinfo',
@@ -263,6 +282,38 @@ function normalizeTokenBalance(balance: any) {
     };
 }
 
+function normalizeTradeLayerMethodSnapshot(raw: any): TradeLayerMethodSnapshot | null {
+    if (!raw || typeof raw !== 'object') return null;
+    const updatedAt = Number(raw.updatedAt);
+    const payload = Object.prototype.hasOwnProperty.call(raw, 'payload') ? raw.payload : undefined;
+    const summary = raw.summary && typeof raw.summary === 'object' ? raw.summary : undefined;
+    return {
+        updatedAt: Number.isFinite(updatedAt) && updatedAt > 0 ? updatedAt : Date.now(),
+        route: raw.route == null ? undefined : String(raw.route),
+        address: raw.address == null ? undefined : String(raw.address),
+        providerNodeId: raw.providerNodeId == null ? undefined : String(raw.providerNodeId),
+        network: raw.network == null ? undefined : String(raw.network),
+        sourceEndpoint: raw.sourceEndpoint == null ? undefined : String(raw.sourceEndpoint),
+        summary,
+        payload,
+    };
+}
+
+function normalizeTradeLayerStateSnapshot(raw: any): TradeLayerStateSnapshot | null {
+    if (!raw || typeof raw !== 'object') return null;
+    const byMethod: Record<string, TradeLayerMethodSnapshot> = {};
+    const source = raw.byMethod && typeof raw.byMethod === 'object' ? raw.byMethod : {};
+    for (const [method, value] of Object.entries(source)) {
+        const normalized = normalizeTradeLayerMethodSnapshot(value);
+        if (!normalized) continue;
+        byMethod[String(method).trim().toLowerCase()] = normalized;
+    }
+    return {
+        updatedAt: Number.isFinite(Number(raw.updatedAt)) && Number(raw.updatedAt) > 0 ? Number(raw.updatedAt) : Date.now(),
+        byMethod,
+    };
+}
+
 function normalizeAccount(account: Partial<WatchOnlyAccount> | null | undefined): WatchOnlyAccount | null {
     const address = normalize(String(account?.address || ''));
     const pubkey = normalize(String(account?.pubkey || ''));
@@ -298,7 +349,11 @@ function toEntry(raw: any): WatchOnlyRegistryEntry | null {
             updatedAt: Number(raw.lastUtxoSnapshot.updatedAt || now),
             scannedHeight: normalizeHeight(raw.lastUtxoSnapshot.scannedHeight),
             scanSourceNodeId: raw.lastUtxoSnapshot.scanSourceNodeId == null ? undefined : String(raw.lastUtxoSnapshot.scanSourceNodeId),
-            utxos: Array.isArray(raw.lastUtxoSnapshot.utxos) ? raw.lastUtxoSnapshot.utxos : [],
+            utxos: Array.isArray(raw.lastUtxoSnapshot.utxos)
+                ? raw.lastUtxoSnapshot.utxos
+                    .map(normalizeSnapshotUtxo)
+                    .filter(Boolean)
+                : [],
         }
         : undefined;
     const lastTokenSnapshot = raw?.lastTokenSnapshot && typeof raw.lastTokenSnapshot === 'object'
@@ -340,6 +395,7 @@ function snapshotFromEntries(entries: Map<string, WatchOnlyRegistryEntry>): Watc
         path: getRegistryPath(),
         generatedAt: Date.now(),
         entries: Array.from(entries.values()).sort((a, b) => a.address.localeCompare(b.address)),
+        ...(tradeLayerStateCache ? { tradeLayerState: tradeLayerStateCache } : {}),
     };
 }
 
@@ -370,6 +426,7 @@ async function loadRegistryFromDisk(): Promise<Map<string, WatchOnlyRegistryEntr
             if (!entry) continue;
             entries.set(entry.address, entry);
         }
+        tradeLayerStateCache = normalizeTradeLayerStateSnapshot(parsed?.tradeLayerState);
         return entries;
     } catch (error) {
         console.warn(`[watchonly-registry] Failed to load ${registryPath}:`, (error as Error)?.message || error);
@@ -801,6 +858,44 @@ export async function loadWatchOnlyRegistrySnapshot(): Promise<WatchOnlyRegistry
     return snapshotFromEntries(entries);
 }
 
+export async function recordTradeLayerRpcSnapshot(input: {
+    method: string;
+    payload: unknown;
+    route?: string | null;
+    address?: string | null;
+    providerNodeId?: string | null;
+    network?: string | null;
+    sourceEndpoint?: string | null;
+    summary?: Record<string, unknown>;
+}) {
+    const method = normalize(String(input.method || '')).toLowerCase();
+    if (!method) return null;
+
+    const now = Date.now();
+    tradeLayerStateCache = {
+        updatedAt: now,
+        byMethod: {
+            ...(tradeLayerStateCache?.byMethod || {}),
+            [method]: {
+                updatedAt: now,
+                route: input.route == null ? undefined : String(input.route),
+                address: input.address == null ? undefined : String(input.address),
+                providerNodeId: input.providerNodeId == null ? undefined : String(input.providerNodeId),
+                network: input.network == null ? undefined : String(input.network),
+                sourceEndpoint: input.sourceEndpoint == null ? undefined : String(input.sourceEndpoint),
+                summary: input.summary,
+                payload: input.payload,
+            },
+        },
+    };
+
+    const registry = await getRegistryEntries();
+    await persistRegistryEntries(registry).catch((error) => {
+        console.warn('[watchonly-registry] persist skipped after trade-layer snapshot:', (error as Error)?.message || error);
+    });
+    return tradeLayerStateCache.byMethod[method];
+}
+
 export async function getWatchOnlyRegistryEntry(address: string): Promise<WatchOnlyRegistryEntry | null> {
     const entries = await getRegistryEntries();
     return entries.get(normalize(address)) || null;
@@ -875,7 +970,9 @@ function normalizeSnapshotUtxo(utxo: any) {
     const txid = normalize(String(utxo.txid || ''));
     const vout = Number(utxo.vout);
     if (!txid || !Number.isInteger(vout)) return null;
+    const id = normalize(String(utxo.id || '')) || `${txid}:${vout}`;
     return {
+        id,
         txid,
         vout,
         amount: Number(utxo.amount || 0),

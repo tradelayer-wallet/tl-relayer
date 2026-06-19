@@ -1,6 +1,6 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
-import axios from "axios";
 import * as bitcoin from "bitcoinjs-lib";
+import { callRpc } from "../services/address.service";
 
 type Body = {
   groupId?: string;
@@ -117,9 +117,11 @@ export async function registerClearlistRoutes(server: FastifyInstance) {
         return { error: "invalid_clearlist_id" };
       }
 
-      // Delegate to core TL node API (expected to run on localhost:3000).
-      // This is protocol state, not an oracle. Keep it simple and cache at callers.
-      const res = await axios.post("http://localhost:3000/tl_getClearlistById", { id });
+      const res = await callRpc("tl_getclearlistbyid", id);
+      if (res.error) {
+        reply.code(502);
+        return { error: res.error, clearlistId: id };
+      }
       const data: any = res?.data;
 
       if (!data) {
@@ -179,9 +181,19 @@ export async function registerClearlistRoutes(server: FastifyInstance) {
         return { allowed: false, enabled: true, reason: "missing_address" };
       }
 
-      // Delegate to core TL node API (expected to run on localhost:3000).
-      // Shape is intentionally loose; we normalize to {allowed:boolean}.
-      const res = await axios.post("http://localhost:3000/tl_getAttestations", { address, id: listId });
+      const res = await callRpc("tl_getattestations", address, listId);
+      if (res.error) {
+        reply.code(502);
+        return {
+          allowed: false,
+          enabled: true,
+          reason: res.error,
+          clearlistId: listId,
+          listId,
+          groupId: groupId || undefined,
+          address,
+        };
+      }
       const data: any = res?.data;
 
       // Common shapes: boolean, {allowed}, {data:true}, {attestations:[...]}

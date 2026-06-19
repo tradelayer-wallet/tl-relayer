@@ -6,6 +6,7 @@ import {
     reconcileWatchOnlyRegistry,
     getWatchOnlyRegistryEntry,
     resolveWatchOnlyPubkey,
+    recordTradeLayerRpcSnapshot,
     recordWatchOnlyTokenSnapshot,
     upsertWatchOnlyAccounts,
 } from "./watchonly-registry.service";
@@ -32,6 +33,16 @@ const PORTFOLIO_HEARTBEAT_METHODS = new Set([
     'listunspent',
     'sendtoaddress',
     'tl_getallbalancesforaddress',
+    'tl_getstatesnapshot',
+    'tl_gettransaction',
+    'tl_getclearlistbyid',
+    'tl_listcontractseries',
+    'tl_getattestations',
+    'tl_getchannelcolumn',
+    'tl_getcontractinfo',
+    'tl_channelbalanceforcommiter',
+    'tl_getinitmargin',
+    'tl_getmaxsynth',
 ]);
 
 function trimSlash(value: string): string {
@@ -40,6 +51,7 @@ function trimSlash(value: string): string {
 
 const TRADELAYER_LISTENER_METHODS: Record<string, string> = {
     tl_getallbalancesforaddress: 'tl_getAllBalancesForAddress',
+    tl_getstatesnapshot: 'tl_getStateSnapshot',
     tl_listproperties: 'tl_listProperties',
     tl_getproperty: 'tl_getProperty',
     tl_getbalance: 'tl_getBalance',
@@ -58,6 +70,7 @@ const TRADELAYER_LISTENER_METHODS: Record<string, string> = {
     tl_getattestations: 'tl_getAttestations',
     tl_getchannelcolumn: 'tl_getChannelColumn',
     tl_gettransaction: 'tl_getTransaction',
+    tl_getclearlistbyid: 'tl_getClearlistById',
 };
 
 function getTradeLayerListenerMethod(method: string): string | undefined {
@@ -85,6 +98,10 @@ function buildListenerBody(method: string, params: any[]): Record<string, unknow
 
     if (normalizedMethod === 'tl_gettransaction') {
         return { txid: first };
+    }
+
+    if (normalizedMethod === 'tl_getclearlistbyid') {
+        return { id: first };
     }
 
     return {
@@ -122,6 +139,38 @@ async function callLocalRpc(method: string, params: any[]): Promise<RpcResult> {
         return callTradeLayerListener(method, params);
     }
     return rpcClient.call(method, ...params);
+}
+
+async function recordTradeLayerState(method: string, params: any[], payload: unknown, providerNodeId?: string | null) {
+    const normalizedMethod = String(method || '').trim().toLowerCase();
+    if (!normalizedMethod.startsWith('tl_')) return;
+    const first = params?.[0];
+    const second = params?.[1];
+    const address =
+        normalizedMethod === 'tl_getproperty' ||
+        normalizedMethod === 'tl_getinitmargin' ||
+        normalizedMethod === 'tl_listproperties'
+            ? undefined
+            : typeof first === 'string' && first.trim()
+                ? String(first).trim()
+                : typeof second === 'string' && second.trim()
+                    ? String(second).trim()
+                    : undefined;
+    await recordTradeLayerRpcSnapshot({
+        method: normalizedMethod,
+        route: '/rpc/route',
+        address,
+        providerNodeId: providerNodeId || null,
+        network: envConfig.COLLATOR_RPC_NETWORK || envConfig.NETWORK || null,
+        sourceEndpoint: 'testnet-api',
+        summary: { paramsCount: params.length },
+        payload,
+    }).catch((error) => {
+        console.warn('[portfolio-heartbeat][relayer][rpc-state] snapshot failed', {
+            method: normalizedMethod,
+            error: error instanceof Error ? error.message : error,
+        });
+    });
 }
 
 function isHtmlLikeResponse(error: any): boolean {
@@ -298,6 +347,12 @@ function summarizePortfolioHeartbeatRpc(method: string, params: any[]): Record<s
         return { address: String(first || '').trim() };
     }
 
+    if (normalizedMethod === 'tl_getstatesnapshot') {
+        return {
+            label: String(first || '').trim() || 'TL',
+        };
+    }
+
     return { paramsCount: params.length };
 }
 
@@ -309,7 +364,11 @@ export async function callRpc(method: string, ...params: any[]): Promise<RpcResu
     const normalizedMethod = String(method || '').trim().toLowerCase();
     if (!useCollatorRpc()) {
         if (PORTFOLIO_HEARTBEAT_METHODS.has(normalizedMethod) || normalizedMethod.startsWith('tl_')) {
-            return { error: 'Collator routing unavailable for watch-only RPC' };
+            const localRes = await callTradeLayerListener(method, params);
+            if (!localRes.error) {
+                await recordTradeLayerState(method, params, localRes.data, null);
+            }
+            return localRes;
         }
         return callTradeLayerListener(method, params);
     }
@@ -364,6 +423,7 @@ export async function callRpc(method: string, ...params: any[]): Promise<RpcResu
                 responseType: Array.isArray(payload?.result ?? payload?.data ?? payload) ? 'array' : typeof (payload?.result ?? payload?.data ?? payload),
             });
         }
+        await recordTradeLayerState(method, params, payload?.result ?? payload?.data ?? payload, payload?.providerNodeId || null);
         return {
             data: payload?.result ?? payload?.data ?? payload,
         };
