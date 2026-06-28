@@ -937,7 +937,12 @@ export async function upsertWatchOnlyEntry(input: {
 }) {
     const summary = await upsertWatchOnlyAccounts(
         [{ address: input.address, pubkey: input.pubkey }],
-        { source: 'manual-upsert', refresh: !!input.imported }
+        {
+            source: 'manual-upsert',
+            refresh: !!input.imported,
+            skipWalletRpc: true,
+            imported: !!input.imported,
+        }
     );
     return summary.results[0] || null;
 }

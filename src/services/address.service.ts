@@ -133,14 +133,6 @@ async function callTradeLayerListener(method: string, params: any[]): Promise<Rp
     }
 }
 
-async function callLocalRpc(method: string, params: any[]): Promise<RpcResult> {
-    const normalizedMethod = String(method || '').trim().toLowerCase();
-    if (normalizedMethod.startsWith('tl_')) {
-        return callTradeLayerListener(method, params);
-    }
-    return rpcClient.call(method, ...params);
-}
-
 async function recordTradeLayerState(method: string, params: any[], payload: unknown, providerNodeId?: string | null) {
     const normalizedMethod = String(method || '').trim().toLowerCase();
     if (!normalizedMethod.startsWith('tl_')) return;
@@ -171,46 +163,6 @@ async function recordTradeLayerState(method: string, params: any[], payload: unk
             error: error instanceof Error ? error.message : error,
         });
     });
-}
-
-function isHtmlLikeResponse(error: any): boolean {
-    const payload = error?.response?.data;
-    if (typeof payload === 'string') {
-        const trimmed = payload.trim().toLowerCase();
-        return trimmed.startsWith('<!doctype') || trimmed.startsWith('<html') || trimmed.includes('<body');
-    }
-    const message = String(error?.message || '').toLowerCase();
-    return message.includes('unexpected token <') || message.includes('html');
-}
-
-function shouldFallbackToLocalRpc(method: string, error: any): boolean {
-    const normalizedMethod = String(method || '').trim().toLowerCase();
-    if (!PORTFOLIO_HEARTBEAT_METHODS.has(normalizedMethod) && !normalizedMethod.startsWith('tl_')) {
-        return false;
-    }
-
-    const statusCode = Number(error?.response?.status);
-    if ([404, 502, 503, 504].includes(statusCode)) {
-        return true;
-    }
-
-    const payload = error?.response?.data;
-    const payloadString = typeof payload === 'string' ? payload.toLowerCase() : '';
-    const errorMessage = String(
-        payload?.error?.message ||
-        payload?.error ||
-        error?.message ||
-        '',
-    ).toLowerCase();
-
-    return (
-        payloadString.includes('<html') ||
-        payloadString.includes('<!doctype') ||
-        errorMessage.includes('no provider') ||
-        errorMessage.includes('providercount: 0') ||
-        errorMessage.includes('failed to import pubkey') ||
-        isHtmlLikeResponse(error)
-    );
 }
 
 export async function callAllocatedRpc(
@@ -405,13 +357,6 @@ export async function callRpc(method: string, ...params: any[]): Promise<RpcResu
                 });
             }
             const message = payload?.error?.message || payload?.error || 'Collator RPC failed';
-            if (shouldFallbackToLocalRpc(method, { response: { status: payload?.statusCode || 502, data: payload?.error || payload } }) && !normalizedMethod.startsWith('tl_')) {
-                console.warn('[portfolio-heartbeat][relayer][rpc] fallback-to-local', {
-                    method,
-                    reason: message,
-                });
-                return callLocalRpc(method, params);
-            }
             return { error: message };
         }
 
@@ -439,13 +384,6 @@ export async function callRpc(method: string, ...params: any[]): Promise<RpcResu
                 method,
                 message,
             });
-        }
-        if (shouldFallbackToLocalRpc(method, error) && !PORTFOLIO_HEARTBEAT_METHODS.has(normalizedMethod) && !normalizedMethod.startsWith('tl_')) {
-            console.warn('[portfolio-heartbeat][relayer][rpc] fallback-to-local', {
-                method,
-                reason: message,
-            });
-            return callLocalRpc(method, params);
         }
         return { error: message };
     }
@@ -535,14 +473,6 @@ export const importPubKey = async (_server: any, params: any[]): Promise<{ data?
             service: envConfig.COLLATOR_RPC_SERVICE,
             network: envConfig.COLLATOR_RPC_NETWORK || envConfig.NETWORK,
         });
-        if (allocatedRes.error && !useCollatorRpc()) {
-            console.warn('[portfolio-heartbeat][relayer][watchonly-import] allocated rpc unavailable, using registry update only', {
-                address: normalizedAddress,
-                providerNodeId: providerNodeId || null,
-                error: allocatedRes.error,
-            });
-        }
-
         const res = await upsertWatchOnlyAccounts([
             { address: normalizedAddress, pubkey: normalizedPubkey },
         ], {
@@ -552,6 +482,16 @@ export const importPubKey = async (_server: any, params: any[]): Promise<{ data?
         });
         const first = res.results[0];
         if (first?.error) throw new Error(first.error);
+
+        if (allocatedRes.error) {
+            console.warn('[portfolio-heartbeat][relayer][watchonly-import] collator-import-failed', {
+                address: normalizedAddress,
+                providerNodeId: providerNodeId || null,
+                error: allocatedRes.error,
+            });
+            return { error: allocatedRes.error };
+        }
+
         console.log('[portfolio-heartbeat][relayer][watchonly-import] response', {
             address: normalizedAddress,
             imported: !!first?.imported,
