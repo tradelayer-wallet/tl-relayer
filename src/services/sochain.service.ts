@@ -98,6 +98,14 @@ export const listunspent = async (
             service: envConfig.COLLATOR_RPC_SERVICE,
             network,
         });
+        if (addressInfo.error) {
+            logPortfolioHeartbeat('utxo', 'address-info-error', {
+                address,
+                error: addressInfo.error,
+                mappedRpc: 'getaddressinfo',
+            });
+            throw new Error(addressInfo.error);
+        }
         logPortfolioHeartbeat('utxo', 'address-info', {
             address,
             ismine: !!addressInfo?.data?.ismine,
@@ -129,7 +137,7 @@ export const listunspent = async (
                 });
 
                 if (importResult.error) {
-                    throw new Error(`Failed to import pubkey: ${importResult.error}`);
+                    throw new Error(importResult.error);
                 }
             } else {
                 throw new Error(`Address is not valid and no pubkey provided for import.`);
