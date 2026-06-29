@@ -171,6 +171,7 @@ export async function callAllocatedRpc(
     options: AllocatedRpcOptions = {},
 ): Promise<RpcResult & { providerNodeId?: string }> {
     const normalizedMethod = String(method || '').trim().toLowerCase();
+    const routedMethod = getTradeLayerListenerMethod(method) || method;
     if (!useCollatorRpc()) {
         if (PORTFOLIO_HEARTBEAT_METHODS.has(normalizedMethod) || normalizedMethod.startsWith('tl_')) {
             return { error: 'Collator routing unavailable for watch-only RPC' };
@@ -194,7 +195,7 @@ export async function callAllocatedRpc(
             {
                 service: options.service || envConfig.COLLATOR_RPC_SERVICE,
                 network: options.network || envConfig.COLLATOR_RPC_NETWORK,
-                method,
+                method: routedMethod,
                 params,
                 timeoutMs: options.timeoutMs,
                 preferredProviderNodeId: providerNodeId,
@@ -314,6 +315,7 @@ export function isCollatorMode(): boolean {
 
 export async function callRpc(method: string, ...params: any[]): Promise<RpcResult> {
     const normalizedMethod = String(method || '').trim().toLowerCase();
+    const routedMethod = getTradeLayerListenerMethod(method) || method;
     if (!useCollatorRpc()) {
         if (PORTFOLIO_HEARTBEAT_METHODS.has(normalizedMethod) || normalizedMethod.startsWith('tl_')) {
             const localRes = await callTradeLayerListener(method, params);
@@ -341,7 +343,7 @@ export async function callRpc(method: string, ...params: any[]): Promise<RpcResu
             {
                 service: envConfig.COLLATOR_RPC_SERVICE,
                 network: envConfig.COLLATOR_RPC_NETWORK,
-                method,
+                method: routedMethod,
                 params,
                 sourceEndpoint: 'testnet-api',
             },
