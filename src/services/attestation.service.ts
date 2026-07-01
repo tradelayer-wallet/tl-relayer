@@ -27,6 +27,11 @@ export interface IpAttestationResult {
   };
 }
 
+type CachedIpAttestation = {
+  expiresAt: number;
+  result: IpAttestationResult;
+};
+
 export class AttestationService {
   private readonly CRIMINAL_IP_API_KEY =
     process.env.CRIMINAL_IP_API_KEY || process.env.VPN_CRIMINALIP || '';
@@ -34,12 +39,25 @@ export class AttestationService {
     process.env.IPINFO_TOKEN || process.env.VPN_IPINFO || '';
 
   private readonly bannedCountries = ['US', 'KP', 'SD', 'RU', 'IR'];
+  private readonly cacheTtlMs = Number(process.env.ATTESTATION_CACHE_TTL_MS || 60 * 60 * 1000);
+  private readonly failureCacheTtlMs = Number(process.env.ATTESTATION_FAILURE_CACHE_TTL_MS || 60 * 1000);
+  private readonly cache = new Map<string, CachedIpAttestation>();
 
   /**
    * Main entrypoint: given a client IP, run reputation checks.
    * Mirrors your FE AttestationService.checkIP, but server-side.
    */
   async checkIp(ipAddress: string): Promise<IpAttestationResult> {
+    const normalizedIp = this.normalizeIp(ipAddress);
+    const cached = this.getCached(normalizedIp);
+    if (cached) return cached;
+
+    const result = await this.checkIpUncached(normalizedIp);
+    this.setCached(normalizedIp, result);
+    return result;
+  }
+
+  private async checkIpUncached(ipAddress: string): Promise<IpAttestationResult> {
     // 1) Fallback: ipinfo (with explicit IP)
     if (this.IPINFO_TOKEN) {
       console.log('In IPINFO call')
@@ -186,6 +204,32 @@ export class AttestationService {
       message: 'No IP reputation provider succeeded',
       error:
         'Both primary and fallback IP reputation APIs failed or are not configured.',
+    });
+  }
+
+  private normalizeIp(ipAddress: string): string {
+    return String(ipAddress || '').trim().replace(/^::ffff:/, '');
+  }
+
+  private getCached(ipAddress: string): IpAttestationResult | null {
+    const cached = this.cache.get(ipAddress);
+    if (!cached) return null;
+    if (cached.expiresAt <= Date.now()) {
+      this.cache.delete(ipAddress);
+      return null;
+    }
+    return {
+      ...cached.result,
+      message: cached.result.message,
+    };
+  }
+
+  private setCached(ipAddress: string, result: IpAttestationResult): void {
+    const ttl = result.success ? this.cacheTtlMs : this.failureCacheTtlMs;
+    if (ttl <= 0) return;
+    this.cache.set(ipAddress, {
+      expiresAt: Date.now() + ttl,
+      result,
     });
   }
 
