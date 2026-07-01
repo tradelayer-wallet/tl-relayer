@@ -4,6 +4,10 @@ import { AttestationService } from '../services/attestation.service';
 
 const attestationService = new AttestationService();
 
+type AttestationIpBody = {
+  ip?: string;
+};
+
 function extractClientIp(req: FastifyRequest): string {
   const headers = req.headers;
 
@@ -28,8 +32,13 @@ function extractClientIp(req: FastifyRequest): string {
 }
 
 export async function registerAttestationRoutes(server: FastifyInstance) {
-  server.get('/ip', async (req: FastifyRequest, reply: FastifyReply) => {
-    const ip = extractClientIp(req);
+  const handleIpCheck = async (
+    req: FastifyRequest<{ Body?: AttestationIpBody }>,
+    reply: FastifyReply,
+  ) => {
+    const bodyIp = typeof req.body?.ip === 'string' ? req.body.ip.trim() : '';
+    const allowIpOverride = process.env.ATTESTATION_ALLOW_IP_OVERRIDE === '1';
+    const ip = allowIpOverride && bodyIp ? bodyIp : extractClientIp(req);
 
     if (!ip) {
       reply.code(400);
@@ -54,5 +63,9 @@ export async function registerAttestationRoutes(server: FastifyInstance) {
         error: 'Internal error while checking IP reputation',
       };
     }
-  });
+  };
+
+  server.get('/ip', handleIpCheck);
+  server.post('/ip', handleIpCheck);
+  server.post('/check', handleIpCheck);
 }

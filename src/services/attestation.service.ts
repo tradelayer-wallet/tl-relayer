@@ -13,13 +13,25 @@ export interface IpAttestationResult {
   source: 'criminalip' | 'ipinfo' | 'unknown';
   message?: string;
   error?: string;
+  attestation?: {
+    ip: string;
+    country?: string;
+    countryCode?: string;
+    isVpn?: boolean;
+    isProxy?: boolean;
+    isDarkweb?: boolean;
+    isAnonymousVpn?: boolean;
+    isBlocked?: boolean;
+    message?: string;
+    source?: string;
+  };
 }
 
 export class AttestationService {
   private readonly CRIMINAL_IP_API_KEY =
-    process.env.CRIMINAL_IP_API_KEY || '';
+    process.env.CRIMINAL_IP_API_KEY || process.env.VPN_CRIMINALIP || '';
   private readonly IPINFO_TOKEN =
-    process.env.IPINFO_TOKEN || '';
+    process.env.IPINFO_TOKEN || process.env.VPN_IPINFO || '';
 
   private readonly bannedCountries = ['US', 'KP', 'SD', 'RU', 'IR'];
 
@@ -38,7 +50,7 @@ export class AttestationService {
         if (resp.status === 200 && resp.data) {
           const data = resp.data as any;
           const ip = data.ip || ipAddress;
-          const country = data.country_code || 'Unknown';
+          const country = String(data.country || data.country_code || 'Unknown').toUpperCase();
           const privacy = data.privacy || {};
 
           const isVpn = !!privacy.vpn;
@@ -50,7 +62,7 @@ export class AttestationService {
           const isBlocked = isVpn || fromBannedCountry;
 
           if (isBlocked) {
-            return {
+            return this.withLegacyAttestation({
               success: true,
               ip,
               countryCode: country,
@@ -62,10 +74,10 @@ export class AttestationService {
               source: 'ipinfo',
               message:
                 'Fallback: Suspicious IP (VPN) or banned country (ipinfo).',
-            };
+            });
           }
 
-          return {
+          return this.withLegacyAttestation({
             success: true,
             ip,
             countryCode: country,
@@ -76,7 +88,7 @@ export class AttestationService {
             isBlocked: false,
             source: 'ipinfo',
             message: 'Fallback API: IP is clean and trusted (ipinfo).',
-          };
+          });
         }
       } catch (err: any) {
         console.error('[attestation] ipinfo fallback failed:', err?.message || err);
@@ -105,10 +117,11 @@ export class AttestationService {
           const whois = data.whois || {};
           const whoisData: any[] = whois.data || [];
 
-          const countryCode =
+          const countryCode = String(
             whoisData[0]?.org_country_code ||
             whoisData[0]?.country_code ||
-            'Unknown';
+            'Unknown',
+          ).toUpperCase();
 
           const fromBannedCountry = whoisData.some(
             (entry: any) =>
@@ -129,7 +142,7 @@ export class AttestationService {
             isVpn || isProxy || isDarkweb || isAnonymousVpn || fromBannedCountry;
 
           if (isBlocked) {
-            return {
+            return this.withLegacyAttestation({
               success: true,
               ip: ipAddress,
               countryCode,
@@ -141,11 +154,11 @@ export class AttestationService {
               source: 'criminalip',
               message:
                 'Suspicious IP detected or originating from a banned country (CriminalIP).',
-            };
+            });
           }
 
           // Clean enough
-          return {
+          return this.withLegacyAttestation({
             success: true,
             ip: ipAddress,
             countryCode,
@@ -156,7 +169,7 @@ export class AttestationService {
             isBlocked: false,
             source: 'criminalip',
             message: 'IP is clean and trusted (CriminalIP).',
-          };
+          });
         }
       } catch (err: any) {
         // Primary failed → we will fall back
@@ -165,7 +178,7 @@ export class AttestationService {
     }
 
     // 3) Last resort: nothing worked / no keys
-    return {
+    return this.withLegacyAttestation({
       success: false,
       ip: ipAddress,
       isBlocked: false,
@@ -173,6 +186,24 @@ export class AttestationService {
       message: 'No IP reputation provider succeeded',
       error:
         'Both primary and fallback IP reputation APIs failed or are not configured.',
+    });
+  }
+
+  private withLegacyAttestation(result: IpAttestationResult): IpAttestationResult {
+    return {
+      ...result,
+      attestation: {
+        ip: result.ip,
+        country: result.countryCode,
+        countryCode: result.countryCode,
+        isVpn: result.isVpn,
+        isProxy: result.isProxy,
+        isDarkweb: result.isDarkweb,
+        isAnonymousVpn: result.isAnonymousVpn,
+        isBlocked: result.isBlocked,
+        message: result.message,
+        source: result.source,
+      },
     };
   }
 }
