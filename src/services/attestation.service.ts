@@ -244,7 +244,10 @@ export class AttestationService {
     if (normalized !== 'UNKNOWN') return normalized;
 
     const ipInfoCountryCode = await this.lookupIpInfoCountryCode(ipAddress);
-    return ipInfoCountryCode || normalized;
+    if (ipInfoCountryCode) return ipInfoCountryCode;
+
+    const ipApiCountryCode = await this.lookupIpApiCountryCode(ipAddress);
+    return ipApiCountryCode || normalized;
   }
 
   private async lookupIpInfoCountryCode(ipAddress: string): Promise<string | null> {
@@ -261,6 +264,22 @@ export class AttestationService {
       return countryCode === 'UNKNOWN' ? null : countryCode;
     } catch (err: any) {
       console.error('[attestation] ipinfo country enrichment failed:', err?.message || err);
+      return null;
+    }
+  }
+
+  private async lookupIpApiCountryCode(ipAddress: string): Promise<string | null> {
+    try {
+      const url = `http://ip-api.com/json/${ipAddress}?fields=status,countryCode,message`;
+      const resp = await axios.get(url, { timeout: 5000 });
+      if (resp.status !== 200 || !resp.data) return null;
+      const data = resp.data as any;
+      if (data.status && data.status !== 'success') return null;
+
+      const countryCode = this.normalizeCountryCode(data.countryCode);
+      return countryCode === 'UNKNOWN' ? null : countryCode;
+    } catch (err: any) {
+      console.error('[attestation] ip-api country enrichment failed:', err?.message || err);
       return null;
     }
   }
