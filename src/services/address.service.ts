@@ -40,7 +40,12 @@ const PORTFOLIO_HEARTBEAT_METHODS = new Set([
     'tl_getattestations',
     'tl_getchannelcolumn',
     'tl_getcontractinfo',
+    'tl_getchannel',
+    'tl_contractposition',
     'tl_channelbalanceforcommiter',
+    'tl_tokentradehistoryforaddress',
+    'tl_contracttradehistoryforaddress',
+    'tl_totaltradehistoryforaddress',
     'tl_getinitmargin',
     'tl_getmaxsynth',
 ]);
@@ -109,6 +114,78 @@ function buildListenerBody(method: string, params: any[]): Record<string, unknow
     };
 }
 
+const TRADELAYER_LISTENER_GET_METHODS = new Set([
+    'tl_contractposition',
+    'tl_channelbalanceforcommiter',
+    'tl_getinitmargin',
+    'tl_getcontractinfo',
+    'tl_getmaxsynth',
+    'tl_tokentradehistoryforaddress',
+    'tl_contracttradehistoryforaddress',
+    'tl_totaltradehistoryforaddress',
+]);
+
+function buildListenerQuery(method: string, params: any[]): Record<string, unknown> {
+    const normalizedMethod = String(method || '').trim().toLowerCase();
+    const first = params?.[0];
+    const body = first && typeof first === 'object' && !Array.isArray(first) ? first : null;
+
+    if (normalizedMethod === 'tl_contractposition') {
+        return {
+            address: body?.address ?? params?.[0],
+            contractId: body?.contractId ?? params?.[1],
+        };
+    }
+
+    if (normalizedMethod === 'tl_channelbalanceforcommiter') {
+        return {
+            address: params?.[0],
+            propertyId: params?.[1],
+        };
+    }
+
+    if (normalizedMethod === 'tl_getinitmargin') {
+        return {
+            contractId: body?.contractId ?? params?.[0],
+            price: body?.price ?? params?.[1],
+        };
+    }
+
+    if (normalizedMethod === 'tl_getcontractinfo') {
+        return {
+            contractId: body?.contractId ?? params?.[0],
+        };
+    }
+
+    if (normalizedMethod === 'tl_getmaxsynth') {
+        return {
+            address: body?.address ?? params?.[0],
+            propId: body?.propId ?? body?.propertyId ?? params?.[1],
+        };
+    }
+
+    if (normalizedMethod === 'tl_tokentradehistoryforaddress') {
+        return {
+            propertyId1: params?.[0],
+            propertyId2: params?.[1],
+            address: params?.[2],
+        };
+    }
+
+    if (normalizedMethod === 'tl_contracttradehistoryforaddress') {
+        return {
+            contractId: params?.[0],
+            address: params?.[1],
+        };
+    }
+
+    if (normalizedMethod === 'tl_totaltradehistoryforaddress') {
+        return { address: params?.[0] };
+    }
+
+    return {};
+}
+
 async function callTradeLayerListener(method: string, params: any[]): Promise<RpcResult> {
     const listenerMethod = getTradeLayerListenerMethod(method);
     if (!listenerMethod) {
@@ -117,7 +194,10 @@ async function callTradeLayerListener(method: string, params: any[]): Promise<Rp
 
     try {
         const url = `${trimSlash(envConfig.TL_LISTENER_URL)}/${listenerMethod}`;
-        const res = await axios.post(url, buildListenerBody(method, params), { timeout: 15000 });
+        const normalizedMethod = String(method || '').trim().toLowerCase();
+        const res = TRADELAYER_LISTENER_GET_METHODS.has(normalizedMethod)
+            ? await axios.get(url, { params: buildListenerQuery(method, params), timeout: 15000 })
+            : await axios.post(url, buildListenerBody(method, params), { timeout: 15000 });
         return { data: res.data };
     } catch (error: any) {
         const payload = error?.response?.data;

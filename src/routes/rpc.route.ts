@@ -328,9 +328,17 @@ logPortfolioHeartbeat('incoming', {
   try {
     const { method } = request.params as { method: string };
     const normalizedMethod = String(method || '').trim().toLowerCase();
-    const params: any[] = Array.isArray(request.body?.params)
+    let params: any[] = Array.isArray(request.body?.params)
       ? request.body.params
       : [];
+    if (
+      normalizedMethod === 'tl_getchannel' &&
+      params.length === 0 &&
+      typeof request.query?.address === 'string' &&
+      request.query.address.trim()
+    ) {
+      params = [request.query.address.trim()];
+    }
     const raw = params[0];
 
     if (
