@@ -20,6 +20,7 @@ type MultisigBody = {
 
 type FinalizeBody = {
     psbtBase64: string;
+    psbt?: string;
     network: string;
 };
 
@@ -71,6 +72,45 @@ export const txRoute = (fastify: FastifyInstance, opts: any, done: any) => {
         } catch (error) {
             console.error('Error in /buildTx route:', error);
             reply.status(500).send({ error: 'Failed to build transaction' });
+        }
+    });
+
+    // Compatibility route used by TL-Web Phantom/custom PSBT signing flows.
+    fastify.post('/buildUnsigned', async (request: FastifyRequest<{ Body: { txConfig?: IBuildTxConfig; network?: string } }>, reply) => {
+        try {
+            const txConfig = request.body?.txConfig;
+            if (!txConfig) {
+                return reply.send({ success: false, error: "Missing txConfig" });
+            }
+
+            const result = await buildTx({
+                ...txConfig,
+                network: request.body?.network || txConfig.network,
+                addPsbt: true,
+            }, false);
+
+            if (result.error || !result.data?.psbt) {
+                return reply.send({
+                    success: false,
+                    error: result.error || "Failed to build unsigned PSBT",
+                });
+            }
+
+            const psbtHex = result.data.psbt;
+            return reply.send({
+                success: true,
+                data: {
+                    ...result.data,
+                    psbtHex,
+                    psbtBase64: Buffer.from(psbtHex, "hex").toString("base64"),
+                },
+            });
+        } catch (error: any) {
+            console.error('Error in /buildUnsigned route:', error);
+            return reply.send({
+                success: false,
+                error: error?.message || "Failed to build unsigned PSBT",
+            });
         }
     });
 
@@ -129,7 +169,8 @@ export const txRoute = (fastify: FastifyInstance, opts: any, done: any) => {
     // Finalize PSBT
     fastify.post('/finalizePsbt', async (req: FastifyRequest<{ Body: FinalizeBody }>, reply) => {
         try {
-            const { psbtBase64, network } = req.body;
+            const { network } = req.body;
+            const psbtBase64 = req.body.psbtBase64 || req.body.psbt;
 
             if (!psbtBase64) {
                 return reply.send({ success: false, error: "Missing PSBT" });
