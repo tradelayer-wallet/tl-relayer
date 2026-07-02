@@ -10,7 +10,7 @@ export interface IpAttestationResult {
   isDarkweb?: boolean;
   isAnonymousVpn?: boolean;
   isBlocked: boolean;
-  source: 'criminalip' | 'ipinfo' | 'unknown';
+  source: 'criminalip' | 'ipinfo' | 'ipinfo+criminalip' | 'unknown';
   message?: string;
   error?: string;
   attestation?: {
@@ -32,6 +32,21 @@ type CachedIpAttestation = {
   result: IpAttestationResult;
 };
 
+type IpInfoLookup = {
+  ip: string;
+  countryCode: string;
+  isVpn: boolean;
+  isProxy: boolean;
+};
+
+type CriminalIpLookup = {
+  countryCode: string;
+  isVpn: boolean;
+  isProxy: boolean;
+  isDarkweb: boolean;
+  isAnonymousVpn: boolean;
+};
+
 export class AttestationService {
   private readonly CRIMINAL_IP_API_KEY =
     process.env.CRIMINAL_IP_API_KEY || process.env.VPN_CRIMINALIP || '';
@@ -43,10 +58,6 @@ export class AttestationService {
   private readonly failureCacheTtlMs = Number(process.env.ATTESTATION_FAILURE_CACHE_TTL_MS || 60 * 1000);
   private readonly cache = new Map<string, CachedIpAttestation>();
 
-  /**
-   * Main entrypoint: given a client IP, run reputation checks.
-   * Mirrors your FE AttestationService.checkIP, but server-side.
-   */
   async checkIp(ipAddress: string): Promise<IpAttestationResult> {
     const normalizedIp = this.normalizeIp(ipAddress);
     const cached = this.getCached(normalizedIp);
@@ -58,143 +69,45 @@ export class AttestationService {
   }
 
   private async checkIpUncached(ipAddress: string): Promise<IpAttestationResult> {
-    // 1) Fallback: ipinfo (with explicit IP)
-    if (this.IPINFO_TOKEN) {
-      console.log('In IPINFO call')
-      try {
-        const fallbackUrl = `https://ipinfo.io/${ipAddress}?token=${this.IPINFO_TOKEN}`;
-        const resp = await axios.get(fallbackUrl, { timeout: 8000 });
+    const [ipInfo, criminalIp] = await Promise.all([
+      this.lookupIpInfo(ipAddress),
+      this.lookupCriminalIp(ipAddress),
+    ]);
 
-        if (resp.status === 200 && resp.data) {
-          const data = resp.data as any;
-          const ip = data.ip || ipAddress;
-          const country = this.normalizeCountryCode(data.country || data.country_code);
-          const privacy = data.privacy || {};
+    if (ipInfo || criminalIp) {
+      const countryCode = await this.resolveCountryCode(
+        ipAddress,
+        ipInfo?.countryCode || criminalIp?.countryCode || 'UNKNOWN',
+      );
+      const isVpn = !!(ipInfo?.isVpn || criminalIp?.isVpn);
+      const isProxy = !!(ipInfo?.isProxy || criminalIp?.isProxy);
+      const isDarkweb = !!criminalIp?.isDarkweb;
+      const isAnonymousVpn = !!criminalIp?.isAnonymousVpn;
+      const fromBannedCountry = this.bannedCountries.includes(countryCode);
+      const isBlocked =
+        isVpn || isProxy || isDarkweb || isAnonymousVpn || fromBannedCountry;
+      const source = ipInfo && criminalIp
+        ? 'ipinfo+criminalip'
+        : ipInfo
+          ? 'ipinfo'
+          : 'criminalip';
 
-          const isVpn = !!privacy.vpn;
-          const isProxy = !!privacy.proxy;
-          const fromBannedCountry = this.bannedCountries.includes(
-            String(country),
-          );
-
-          const isBlocked = isVpn || fromBannedCountry;
-
-          if (isBlocked) {
-            return this.withLegacyAttestation({
-              success: true,
-              ip,
-              countryCode: country,
-              isVpn,
-              isProxy,
-              isDarkweb: false,
-              isAnonymousVpn: false,
-              isBlocked: true,
-              source: 'ipinfo',
-              message:
-                'Fallback: Suspicious IP (VPN) or banned country (ipinfo).',
-            });
-          }
-
-          return this.withLegacyAttestation({
-            success: true,
-            ip,
-            countryCode: country,
-            isVpn,
-            isProxy,
-            isDarkweb: false,
-            isAnonymousVpn: false,
-            isBlocked: false,
-            source: 'ipinfo',
-            message: 'Fallback API: IP is clean and trusted (ipinfo).',
-          });
-        }
-      } catch (err: any) {
-        console.error('[attestation] ipinfo fallback failed:', err?.message || err);
-      }
+      return this.withLegacyAttestation({
+        success: true,
+        ip: ipInfo?.ip || ipAddress,
+        countryCode,
+        isVpn,
+        isProxy,
+        isDarkweb,
+        isAnonymousVpn,
+        isBlocked,
+        source,
+        message: isBlocked
+          ? 'Suspicious IP detected or originating from a banned country.'
+          : 'IP is clean and trusted.',
+      });
     }
 
-
-    console.log('checking IP '+ipAddress)
-    // 2) Try CriminalIP if key present
-    if (this.CRIMINAL_IP_API_KEY) {
-      console.log('trying for crimIP')
-      try {
-        const primaryUrl =
-          `https://api.criminalip.io/v1/asset/ip/report?ip=${ipAddress}`;
-
-        const response = await axios.get(primaryUrl, {
-          headers: {
-            'x-api-key': this.CRIMINAL_IP_API_KEY,
-          },
-          timeout: 8000,
-        });
-
-        if (response.status === 200 && response.data) {
-          const data = response.data as any;
-          const issues = data.issues || {};
-          const whois = data.whois || {};
-          const whoisData: any[] = whois.data || [];
-
-          const countryCode = await this.resolveCountryCode(
-            ipAddress,
-            this.countryFromCriminalIpData(data, whoisData),
-          );
-
-          const fromBannedCountry = whoisData.some(
-            (entry: any) =>
-              entry &&
-              this.bannedCountries.includes(
-                (entry.org_country_code ||
-                  entry.country_code ||
-                  '').toUpperCase(),
-              ),
-          );
-
-          const isVpn = !!issues.is_vpn;
-          const isProxy = !!issues.is_proxy;
-          const isDarkweb = !!issues.is_darkweb;
-          const isAnonymousVpn = !!issues.is_anonymous_vpn;
-
-          const isBlocked =
-            isVpn || isProxy || isDarkweb || isAnonymousVpn || fromBannedCountry;
-
-          if (isBlocked) {
-            return this.withLegacyAttestation({
-              success: true,
-              ip: ipAddress,
-              countryCode,
-              isVpn,
-              isProxy,
-              isDarkweb,
-              isAnonymousVpn,
-              isBlocked: true,
-              source: 'criminalip',
-              message:
-                'Suspicious IP detected or originating from a banned country (CriminalIP).',
-            });
-          }
-
-          // Clean enough
-          return this.withLegacyAttestation({
-            success: true,
-            ip: ipAddress,
-            countryCode,
-            isVpn,
-            isProxy,
-            isDarkweb,
-            isAnonymousVpn,
-            isBlocked: false,
-            source: 'criminalip',
-            message: 'IP is clean and trusted (CriminalIP).',
-          });
-        }
-      } catch (err: any) {
-        // Primary failed → we will fall back
-        console.error('[attestation] CriminalIP failed:', err?.message || err);
-      }
-    }
-
-    // 3) Last resort: nothing worked / no keys
     return this.withLegacyAttestation({
       success: false,
       ip: ipAddress,
@@ -204,6 +117,59 @@ export class AttestationService {
       error:
         'Both primary and fallback IP reputation APIs failed or are not configured.',
     });
+  }
+
+  private async lookupIpInfo(ipAddress: string): Promise<IpInfoLookup | null> {
+    try {
+      const tokenQuery = this.IPINFO_TOKEN ? `?token=${this.IPINFO_TOKEN}` : '';
+      const url = `https://ipinfo.io/${ipAddress}/json${tokenQuery}`;
+      const resp = await axios.get(url, { timeout: 8000 });
+      if (resp.status !== 200 || !resp.data) return null;
+
+      const data = resp.data as any;
+      const privacy = data.privacy || {};
+      return {
+        ip: data.ip || ipAddress,
+        countryCode: this.normalizeCountryCode(data.country || data.country_code),
+        isVpn: !!privacy.vpn,
+        isProxy: !!privacy.proxy,
+      };
+    } catch (err: any) {
+      console.error('[attestation] ipinfo failed:', err?.message || err);
+      return null;
+    }
+  }
+
+  private async lookupCriminalIp(ipAddress: string): Promise<CriminalIpLookup | null> {
+    if (!this.CRIMINAL_IP_API_KEY) return null;
+
+    try {
+      const primaryUrl =
+        `https://api.criminalip.io/v1/asset/ip/report?ip=${ipAddress}`;
+      const response = await axios.get(primaryUrl, {
+        headers: {
+          'x-api-key': this.CRIMINAL_IP_API_KEY,
+        },
+        timeout: 8000,
+      });
+
+      if (response.status !== 200 || !response.data) return null;
+
+      const data = response.data as any;
+      const issues = data.issues || {};
+      const whois = data.whois || {};
+      const whoisData: any[] = whois.data || [];
+      return {
+        countryCode: this.countryFromCriminalIpData(data, whoisData),
+        isVpn: !!issues.is_vpn,
+        isProxy: !!issues.is_proxy,
+        isDarkweb: !!issues.is_darkweb,
+        isAnonymousVpn: !!issues.is_anonymous_vpn,
+      };
+    } catch (err: any) {
+      console.error('[attestation] CriminalIP failed:', err?.message || err);
+      return null;
+    }
   }
 
   private normalizeIp(ipAddress: string): string {
@@ -243,29 +209,8 @@ export class AttestationService {
     const normalized = this.normalizeCountryCode(providerCountryCode);
     if (normalized !== 'UNKNOWN') return normalized;
 
-    const ipInfoCountryCode = await this.lookupIpInfoCountryCode(ipAddress);
-    if (ipInfoCountryCode) return ipInfoCountryCode;
-
     const ipApiCountryCode = await this.lookupIpApiCountryCode(ipAddress);
     return ipApiCountryCode || normalized;
-  }
-
-  private async lookupIpInfoCountryCode(ipAddress: string): Promise<string | null> {
-    try {
-      const tokenQuery = this.IPINFO_TOKEN ? `?token=${this.IPINFO_TOKEN}` : '';
-      const url = `https://ipinfo.io/${ipAddress}/json${tokenQuery}`;
-      const resp = await axios.get(url, { timeout: 5000 });
-      if (resp.status !== 200 || !resp.data) return null;
-      const data = resp.data as any;
-
-      const countryCode = this.normalizeCountryCode(
-        data.country || data.country_code,
-      );
-      return countryCode === 'UNKNOWN' ? null : countryCode;
-    } catch (err: any) {
-      console.error('[attestation] ipinfo country enrichment failed:', err?.message || err);
-      return null;
-    }
   }
 
   private async lookupIpApiCountryCode(ipAddress: string): Promise<string | null> {
