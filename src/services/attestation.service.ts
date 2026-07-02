@@ -68,7 +68,7 @@ export class AttestationService {
         if (resp.status === 200 && resp.data) {
           const data = resp.data as any;
           const ip = data.ip || ipAddress;
-          const country = String(data.country || data.country_code || 'Unknown').toUpperCase();
+          const country = this.normalizeCountryCode(data.country || data.country_code);
           const privacy = data.privacy || {};
 
           const isVpn = !!privacy.vpn;
@@ -135,11 +135,10 @@ export class AttestationService {
           const whois = data.whois || {};
           const whoisData: any[] = whois.data || [];
 
-          const countryCode = String(
-            whoisData[0]?.org_country_code ||
-            whoisData[0]?.country_code ||
-            'Unknown',
-          ).toUpperCase();
+          const countryCode = await this.resolveCountryCode(
+            ipAddress,
+            this.countryFromCriminalIpData(data, whoisData),
+          );
 
           const fromBannedCountry = whoisData.some(
             (entry: any) =>
@@ -209,6 +208,61 @@ export class AttestationService {
 
   private normalizeIp(ipAddress: string): string {
     return String(ipAddress || '').trim().replace(/^::ffff:/, '');
+  }
+
+  private normalizeCountryCode(countryCode: any): string {
+    const normalized = String(countryCode || '').trim().toUpperCase();
+    return normalized || 'UNKNOWN';
+  }
+
+  private countryFromCriminalIpData(data: any, whoisData: any[]): string {
+    const directCountry =
+      data?.country_code ||
+      data?.country ||
+      data?.ip_country_code ||
+      data?.location?.country_code ||
+      data?.location?.country ||
+      data?.summary?.country_code ||
+      data?.summary?.country;
+
+    if (directCountry) return this.normalizeCountryCode(directCountry);
+
+    for (const entry of whoisData || []) {
+      const country =
+        entry?.org_country_code ||
+        entry?.country_code ||
+        entry?.country ||
+        entry?.registry_country_code;
+      if (country) return this.normalizeCountryCode(country);
+    }
+
+    return 'UNKNOWN';
+  }
+
+  private async resolveCountryCode(ipAddress: string, providerCountryCode: string): Promise<string> {
+    const normalized = this.normalizeCountryCode(providerCountryCode);
+    if (normalized !== 'UNKNOWN') return normalized;
+
+    const ipInfoCountryCode = await this.lookupIpInfoCountryCode(ipAddress);
+    return ipInfoCountryCode || normalized;
+  }
+
+  private async lookupIpInfoCountryCode(ipAddress: string): Promise<string | null> {
+    try {
+      const tokenQuery = this.IPINFO_TOKEN ? `?token=${this.IPINFO_TOKEN}` : '';
+      const url = `https://ipinfo.io/${ipAddress}/json${tokenQuery}`;
+      const resp = await axios.get(url, { timeout: 5000 });
+      if (resp.status !== 200 || !resp.data) return null;
+      const data = resp.data as any;
+
+      const countryCode = this.normalizeCountryCode(
+        data.country || data.country_code,
+      );
+      return countryCode === 'UNKNOWN' ? null : countryCode;
+    } catch (err: any) {
+      console.error('[attestation] ipinfo country enrichment failed:', err?.message || err);
+      return null;
+    }
   }
 
   private getCached(ipAddress: string): IpAttestationResult | null {
