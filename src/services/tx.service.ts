@@ -2,7 +2,7 @@ import * as bitcoin from 'bitcoinjs-lib';
 import axios from 'axios';
 import { rpcClient } from "../config/rpc.config";  // Your configured RPC client
 import { getWatchOnlyRegistryEntry } from './watchonly-registry.service';
-import { callRpc } from './address.service';
+import { callAllocatedRpc, callRpc } from './address.service';
 
 /********************************************************************
  * Type Definitions (adjust as needed in your environment)
@@ -228,6 +228,10 @@ export const smartRpc: TClient = async (
     };
   }
 
+  if (webFirst) {
+    return await callAllocatedRpc(method, params);
+  }
+
   if ((rpcClient && !api && !webFirst)) {
     return await rpcClient.call(method, ...params);
   } else {
@@ -442,14 +446,21 @@ export const buildTx = async (txConfig: IBuildTxConfig, isApiMode: boolean) => {
     const fromAddress = fromKeyPair.address;
     const toAddress   = toKeyPair.address;
 
-    // 1) Get UTXOs from node
-    const luRes = await smartRpc('listunspent', [0, 999999999, [fromAddress]], isApiMode);
-    if (luRes.error || !luRes.data) {
-      throw new Error(`listunspent(from): ${luRes.error}`);
+    const providedInputs = Array.isArray(txConfig.inputs) ? txConfig.inputs : [];
+    let sourceUtxos = providedInputs;
+    if (!sourceUtxos.length) {
+      const luRes = await smartRpc('listunspent', [0, 999999999, {
+        address: fromAddress,
+        pubkey: fromKeyPair.pubkey,
+      }], isApiMode);
+      if (luRes.error || !luRes.data) {
+        throw new Error(`listunspent(from): ${luRes.error}`);
+      }
+      sourceUtxos = luRes.data as IUTXO[];
     }
 
     // 2) Sort and pick enough inputs
-    const _utxos = (luRes.data as IUTXO[]).sort((a, b) => b.amount - a.amount);
+    const _utxos = sourceUtxos.sort((a, b) => b.amount - a.amount);
     console.log('UTXOs:', JSON.stringify(_utxos));
 
     const inputsRes = getEnoughInputs2(_utxos, amount!);
