@@ -119,6 +119,16 @@ export const txRoute = (fastify: FastifyInstance, opts: any, done: any) => {
     fastify.post('/buildUnsigned', handleBuildUnsigned);
     fastify.post('/buildunsigned', handleBuildUnsigned);
     fastify.post('/build-unsigned', handleBuildUnsigned);
+    fastify.post('/:txAction', async (
+        request: FastifyRequest<{ Params: { txAction: string }; Body: { txConfig?: IBuildTxConfig; network?: string } }>,
+        reply
+    ) => {
+        const action = String(request.params.txAction || '').trim().toLowerCase();
+        if (action === 'buildunsigned' || action === 'build-unsigned' || action === 'build_unsigned') {
+            return handleBuildUnsigned(request as any, reply);
+        }
+        reply.status(404).send('not found');
+    });
 
     // Compute multisig
     fastify.post('/multisig', async (req: FastifyRequest<{ Body: MultisigBody }>, reply) => {
