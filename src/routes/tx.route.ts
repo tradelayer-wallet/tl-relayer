@@ -25,6 +25,43 @@ type FinalizeBody = {
 };
 
 export const txRoute = (fastify: FastifyInstance, opts: any, done: any) => {
+    async function handleBuildUnsigned(request: FastifyRequest<{ Body: { txConfig?: IBuildTxConfig; network?: string } }>, reply: any) {
+        try {
+            const txConfig = request.body?.txConfig;
+            if (!txConfig) {
+                return reply.send({ success: false, error: "Missing txConfig" });
+            }
+
+            const result = await buildTx({
+                ...txConfig,
+                network: request.body?.network || txConfig.network,
+                addPsbt: true,
+            }, false);
+
+            if (result.error || !result.data?.psbt) {
+                return reply.send({
+                    success: false,
+                    error: result.error || "Failed to build unsigned PSBT",
+                });
+            }
+
+            const psbtHex = result.data.psbt;
+            return reply.send({
+                success: true,
+                data: {
+                    ...result.data,
+                    psbtHex,
+                    psbtBase64: Buffer.from(psbtHex, "hex").toString("base64"),
+                },
+            });
+        } catch (error: any) {
+            console.error('Error in unsigned PSBT route:', error);
+            return reply.send({
+                success: false,
+                error: error?.message || "Failed to build unsigned PSBT",
+            });
+        }
+    }
 
     // Get transaction by txid
     fastify.get('/:txid', async (request: FastifyRequest<{ Params: { txid: string } }>, reply) => {
@@ -64,8 +101,11 @@ export const txRoute = (fastify: FastifyInstance, opts: any, done: any) => {
     });
 
     // Build generic transaction
-    fastify.post('/buildTx', async (request: FastifyRequest<{ Body: { params: IBuildTxConfig } }>, reply) => {
+    fastify.post('/buildTx', async (request: FastifyRequest<{ Body: { params?: IBuildTxConfig; txConfig?: IBuildTxConfig; network?: string } }>, reply) => {
         try {
+            if (request.body?.txConfig) {
+                return handleBuildUnsigned(request as any, reply);
+            }
             const { params } = request.body;
             const result = await buildTx(params, false);
             reply.send(result);
@@ -76,43 +116,9 @@ export const txRoute = (fastify: FastifyInstance, opts: any, done: any) => {
     });
 
     // Compatibility route used by TL-Web Phantom/custom PSBT signing flows.
-    fastify.post('/buildUnsigned', async (request: FastifyRequest<{ Body: { txConfig?: IBuildTxConfig; network?: string } }>, reply) => {
-        try {
-            const txConfig = request.body?.txConfig;
-            if (!txConfig) {
-                return reply.send({ success: false, error: "Missing txConfig" });
-            }
-
-            const result = await buildTx({
-                ...txConfig,
-                network: request.body?.network || txConfig.network,
-                addPsbt: true,
-            }, false);
-
-            if (result.error || !result.data?.psbt) {
-                return reply.send({
-                    success: false,
-                    error: result.error || "Failed to build unsigned PSBT",
-                });
-            }
-
-            const psbtHex = result.data.psbt;
-            return reply.send({
-                success: true,
-                data: {
-                    ...result.data,
-                    psbtHex,
-                    psbtBase64: Buffer.from(psbtHex, "hex").toString("base64"),
-                },
-            });
-        } catch (error: any) {
-            console.error('Error in /buildUnsigned route:', error);
-            return reply.send({
-                success: false,
-                error: error?.message || "Failed to build unsigned PSBT",
-            });
-        }
-    });
+    fastify.post('/buildUnsigned', handleBuildUnsigned);
+    fastify.post('/buildunsigned', handleBuildUnsigned);
+    fastify.post('/build-unsigned', handleBuildUnsigned);
 
     // Compute multisig
     fastify.post('/multisig', async (req: FastifyRequest<{ Body: MultisigBody }>, reply) => {
