@@ -204,23 +204,33 @@ export const listunspent = async (
                 })
             );
 
-        const chainInfo = await callAllocatedRpc('getblockchaininfo', [], {
-            service: envConfig.COLLATOR_RPC_SERVICE,
-            network,
-        });
-        const currentHeight = Number(chainInfo?.data?.blocks ?? chainInfo?.data?.result?.blocks);
-        const firstFunding = deriveFirstFundingScanInfo(data, Number.isFinite(currentHeight) ? currentHeight : null);
+        const routedSnapshotHeight = Number(luRes.snapshotHeight);
+        let scannedHeight = Number.isFinite(routedSnapshotHeight) && routedSnapshotHeight >= 0
+            ? Math.floor(routedSnapshotHeight)
+            : null;
+        if (scannedHeight === null) {
+            const chainInfo = await callAllocatedRpc('getblockchaininfo', [], {
+                service: envConfig.COLLATOR_RPC_SERVICE,
+                network,
+            });
+            const currentHeight = Number(chainInfo?.data?.blocks ?? chainInfo?.data?.result?.blocks);
+            scannedHeight = Number.isFinite(currentHeight) && currentHeight >= 0
+                ? Math.floor(currentHeight)
+                : null;
+        }
+        const scanSourceNodeId = scanOptions.scanSourceNodeId || luRes.providerNodeId || `${os.hostname()}:${process.pid}`;
+        const firstFunding = deriveFirstFundingScanInfo(data, scannedHeight);
 
         recordWatchOnlySnapshot({
             network,
             address,
             pubkey: effectivePubkey,
             utxos: data,
-            scannedHeight: Number.isFinite(currentHeight) ? currentHeight : null,
+            scannedHeight,
             firstFundingHeight: firstFunding.firstFundingHeight,
             firstFundingTxid: firstFunding.firstFundingTxid,
             scanState: scanOptions.scanState || 'live',
-            scanSourceNodeId: scanOptions.scanSourceNodeId || `${os.hostname()}:${process.pid}`,
+            scanSourceNodeId,
         });
 
         await recordTradeLayerRpcSnapshot({
@@ -229,10 +239,10 @@ export const listunspent = async (
             address,
             network,
             sourceEndpoint: 'testnet-api',
-            providerNodeId: scanOptions.scanSourceNodeId || `${os.hostname()}:${process.pid}`,
+            providerNodeId: scanSourceNodeId,
             summary: {
                 count: data.length,
-                scannedHeight: Number.isFinite(currentHeight) ? currentHeight : null,
+                scannedHeight,
             },
             payload: data,
         }).catch((error) => {
@@ -242,8 +252,8 @@ export const listunspent = async (
         logPortfolioHeartbeat('utxo', 'snapshot-recorded', {
             address,
             count: data.length,
-            scannedHeight: Number.isFinite(currentHeight) ? currentHeight : null,
-            scanSourceNodeId: scanOptions.scanSourceNodeId || `${os.hostname()}:${process.pid}`,
+            scannedHeight,
+            scanSourceNodeId,
             pubkey: effectivePubkey || null,
         });
 

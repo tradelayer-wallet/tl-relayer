@@ -272,7 +272,7 @@ async function routeLegacyWatchOnlyCall(
     normalizedMethod: string,
     params: any[],
     options: AllocatedRpcOptions,
-): Promise<(RpcResult & { providerNodeId?: string }) | null> {
+): Promise<(RpcResult & { providerNodeId?: string; snapshotHeight?: number | null }) | null> {
     if (normalizedMethod === 'getaddressinfo') {
         // The old portfolio flow probes ownership before registration. Never forward this raw wallet RPC.
         return { data: { ismine: false, iswatchonly: false, watchOnlyScoped: true } };
@@ -294,23 +294,27 @@ async function routeLegacyWatchOnlyCall(
     if (snapshot.error) return snapshot;
     const payload = snapshot.data || {};
     const utxos = Array.isArray(payload.utxos) ? payload.utxos : [];
+    const sourceHeight = Number(payload?.snapshot?.sourceBlock?.height);
+    const snapshotHeight = Number.isFinite(sourceHeight) && sourceHeight >= 0
+        ? Math.floor(sourceHeight)
+        : null;
     await recordWatchOnlySnapshot({
         network: payload.network || account.network,
         address: payload.address || account.address,
         pubkey: payload.pubkey || account.pubkey,
         utxos,
-        scannedHeight: payload?.snapshot?.sourceBlock?.height ?? null,
+        scannedHeight: snapshotHeight,
         scanSourceNodeId: snapshot.providerNodeId || null,
         scanState: 'live',
     }).catch(() => null);
-    return { data: utxos, providerNodeId: snapshot.providerNodeId };
+    return { data: utxos, providerNodeId: snapshot.providerNodeId, snapshotHeight };
 }
 
 export async function callAllocatedRpc(
     method: string,
     params: any[] = [],
     options: AllocatedRpcOptions = {},
-): Promise<RpcResult & { providerNodeId?: string }> {
+): Promise<RpcResult & { providerNodeId?: string; snapshotHeight?: number | null }> {
     const normalizedMethod = String(method || '').trim().toLowerCase();
     const legacyWatchOnly = await routeLegacyWatchOnlyCall(normalizedMethod, params, options);
     if (legacyWatchOnly) return legacyWatchOnly;
