@@ -163,17 +163,18 @@ async function handleGetAttestations(request: any, reply: any) {
 
 async function handleGetChannelColumn(request: any, reply: any) {
   try {
-    const { myAddr, cpAddr } = request.body as {
-      myAddr?: string;
-      cpAddr?: string;
-    };
+    const body = request.body ?? {};
+    const params = Array.isArray(body.params) ? body.params : [];
+    const channelAddress = body.channelAddress || body.channel || params[0];
+    const newCommitAddress = body.newCommitAddress || body.myAddress || body.myAddr || body.buyerAddress || params[1];
+    const cpAddress = body.cpAddress || body.cpAddr || params[2];
 
-    if (!myAddr || !cpAddr) {
-      reply.code(400).send({ error: "Invalid myAddr or cpAddr" });
+    if (!channelAddress || !newCommitAddress || !cpAddress) {
+      reply.code(400).send({ error: "channelAddress, newCommitAddress, and cpAddress are required" });
       return;
     }
 
-    const res = await callRpc('tl_getchannelcolumn', myAddr, cpAddr);
+    const res = await callRpc('tl_getchannelcolumn', channelAddress, newCommitAddress, cpAddress);
     if (res.error) {
       reply.code(502).send({ error: res.error });
       return;
@@ -181,8 +182,8 @@ async function handleGetChannelColumn(request: any, reply: any) {
     await recordRouteTradeLayerState({
       method: 'tl_getChannelColumn',
       payload: res.data,
-      address: myAddr,
-      summary: { cpAddr },
+      address: newCommitAddress,
+      summary: { channelAddress, cpAddress },
       route: '/tl_getChannelColumn',
     });
     reply.send(res.data);

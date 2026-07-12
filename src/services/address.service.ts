@@ -100,9 +100,11 @@ function buildListenerBody(method: string, params: any[]): Record<string, unknow
     }
 
     if (normalizedMethod === 'tl_getchannelcolumn') {
+        const body = first && typeof first === 'object' && !Array.isArray(first) ? first : {};
         return {
-            channelAddress: params?.[0],
-            cpAddress: params?.[1],
+            channelAddress: body.channelAddress || body.channel || params?.[0],
+            newCommitAddress: body.newCommitAddress || body.myAddress || body.myAddr || body.buyerAddress || params?.[1],
+            cpAddress: body.cpAddress || body.cpAddr || params?.[2],
         };
     }
 
