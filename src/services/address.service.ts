@@ -8,6 +8,7 @@ import {
     resolveWatchOnlyPubkey,
     recordTradeLayerRpcSnapshot,
     recordWatchOnlyTokenSnapshot,
+    recordWatchOnlySnapshot,
     upsertWatchOnlyAccounts,
 } from "./watchonly-registry.service";
 
@@ -33,6 +34,8 @@ const PORTFOLIO_HEARTBEAT_METHODS = new Set([
     'listunspent',
     'sendtoaddress',
     'tl_getallbalancesforaddress',
+    'tl_watchonly_register',
+    'tl_watchonly_utxos',
     'tl_getstatesnapshot',
     'tl_gettransaction',
     'tl_getclearlistbyid',
@@ -57,6 +60,8 @@ function trimSlash(value: string): string {
 const TRADELAYER_LISTENER_METHODS: Record<string, string> = {
     tl_getallbalancesforaddress: 'tl_getAllBalancesForAddress',
     tl_getstatesnapshot: 'tl_getStateSnapshot',
+    tl_watchonly_register: 'tl_watchonly_register',
+    tl_watchonly_utxos: 'tl_watchonly_utxos',
     tl_listproperties: 'tl_listProperties',
     tl_getproperty: 'tl_getProperty',
     tl_getbalance: 'tl_getBalance',
@@ -107,6 +112,15 @@ function buildListenerBody(method: string, params: any[]): Record<string, unknow
 
     if (normalizedMethod === 'tl_getclearlistbyid') {
         return { id: first };
+    }
+
+    if (normalizedMethod === 'tl_watchonly_register' || normalizedMethod === 'tl_watchonly_utxos') {
+        const account = first && typeof first === 'object' && !Array.isArray(first) ? first : {};
+        return {
+            address: account.address,
+            pubkey: account.pubkey || account.pubKey,
+            network: account.network,
+        };
     }
 
     return {
@@ -245,12 +259,61 @@ async function recordTradeLayerState(method: string, params: any[], payload: unk
     });
 }
 
+function scopedWatchOnlyAccount(params: any[]): { address: string; pubkey: string; network?: string } | null {
+    const first = params?.[0] && typeof params[0] === 'object' && !Array.isArray(params[0]) ? params[0] : null;
+    const address = String(first?.address || '').trim();
+    const pubkey = String(first?.pubkey || first?.pubKey || '').trim();
+    const network = typeof first?.network === 'string' ? first.network.trim() : undefined;
+    if (!address || !pubkey) return null;
+    return { address, pubkey, ...(network ? { network } : {}) };
+}
+
+async function routeLegacyWatchOnlyCall(
+    normalizedMethod: string,
+    params: any[],
+    options: AllocatedRpcOptions,
+): Promise<(RpcResult & { providerNodeId?: string }) | null> {
+    if (normalizedMethod === 'getaddressinfo') {
+        // The old portfolio flow probes ownership before registration. Never forward this raw wallet RPC.
+        return { data: { ismine: false, iswatchonly: false, watchOnlyScoped: true } };
+    }
+
+    if (normalizedMethod === 'getblockchaininfo') {
+        // Snapshot responses carry the authoritative source block; callers without an address get no daemon fallback.
+        return { data: { blocks: null, watchOnlyScoped: true } };
+    }
+
+    if (normalizedMethod !== 'listunspent') return null;
+    const filter = params?.[2];
+    const account = filter && typeof filter === 'object'
+        ? scopedWatchOnlyAccount([{ address: filter.address, pubkey: filter.pubkey, network: filter.network || options.network }])
+        : null;
+    if (!account) return { error: 'WATCH_ONLY_INVALID_REQUEST: address and pubkey are required for a scoped UTXO snapshot' };
+
+    const snapshot = await callAllocatedRpc('tl_watchonly_utxos', [account], options);
+    if (snapshot.error) return snapshot;
+    const payload = snapshot.data || {};
+    const utxos = Array.isArray(payload.utxos) ? payload.utxos : [];
+    await recordWatchOnlySnapshot({
+        network: payload.network || account.network,
+        address: payload.address || account.address,
+        pubkey: payload.pubkey || account.pubkey,
+        utxos,
+        scannedHeight: payload?.snapshot?.sourceBlock?.height ?? null,
+        scanSourceNodeId: snapshot.providerNodeId || null,
+        scanState: 'live',
+    }).catch(() => null);
+    return { data: utxos, providerNodeId: snapshot.providerNodeId };
+}
+
 export async function callAllocatedRpc(
     method: string,
     params: any[] = [],
     options: AllocatedRpcOptions = {},
 ): Promise<RpcResult & { providerNodeId?: string }> {
     const normalizedMethod = String(method || '').trim().toLowerCase();
+    const legacyWatchOnly = await routeLegacyWatchOnlyCall(normalizedMethod, params, options);
+    if (legacyWatchOnly) return legacyWatchOnly;
     const routedMethod = getTradeLayerListenerMethod(method) || method;
     if (!useCollatorRpc()) {
         if (PORTFOLIO_HEARTBEAT_METHODS.has(normalizedMethod) || normalizedMethod.startsWith('tl_')) {
@@ -544,13 +607,17 @@ export const importPubKey = async (_server: any, params: any[]): Promise<{ data?
             address: String(address || '').trim(),
             hasPubkey: !!pubkey,
             sourceEndpoint: 'testnet-api',
-            mappedRpc: 'importpubkey',
+            mappedRpc: 'tl_watchonly_register',
         });
 
         const normalizedAddress = String(address || '').trim();
         const normalizedPubkey = String(pubkey || '').trim();
         const providerNodeId = await resolveWatchOnlyProviderNodeId(normalizedAddress);
-        const allocatedRes = await callAllocatedRpc('importpubkey', [normalizedPubkey, normalizedAddress, false], {
+        const allocatedRes = await callAllocatedRpc('tl_watchonly_register', [{
+            address: normalizedAddress,
+            pubkey: normalizedPubkey,
+            network: envConfig.COLLATOR_RPC_NETWORK || envConfig.NETWORK,
+        }], {
             preferredProviderNodeId: providerNodeId,
             service: envConfig.COLLATOR_RPC_SERVICE,
             network: envConfig.COLLATOR_RPC_NETWORK || envConfig.NETWORK,
@@ -598,22 +665,29 @@ export const importWatchOnlyAccounts = async (
             count: Array.isArray(accounts) ? accounts.length : 0,
             addresses: (accounts || []).map((account) => String(account?.address || '').trim()).filter(Boolean),
             sourceEndpoint: 'testnet-api',
-            mappedRpc: 'importpubkey',
+            mappedRpc: 'tl_watchonly_register',
         });
-        const res = await upsertWatchOnlyAccounts(
-            (accounts || []).map((account) => ({
-                address: String(account?.address || '').trim(),
-                pubkey: String(account?.pubkey || '').trim(),
-            })),
-            { source: 'sync-watchonly' }
-        );
+        const registered = [] as WatchOnlyAccount[];
+        const failures: Array<{ address: string; pubkey: string; error: string }> = [];
+        for (const account of accounts || []) {
+            const address = String(account?.address || '').trim();
+            const pubkey = String(account?.pubkey || '').trim();
+            const result = await importPubKey(_server, [pubkey, address]);
+            if (result.error) failures.push({ address, pubkey, error: result.error });
+            else registered.push({ address, pubkey });
+        }
+        const res = await upsertWatchOnlyAccounts(registered, {
+            source: 'sync-watchonly',
+            skipWalletRpc: true,
+            imported: true,
+        });
 
         console.log('[portfolio-heartbeat][relayer][watchonly-sync] response', {
             imported: res.imported,
             refreshed: res.refreshed,
             skipped: res.skipped,
             updated: res.updated,
-            failed: res.failed,
+            failed: res.failed + failures.length,
         });
 
         return {
@@ -622,13 +696,16 @@ export const importWatchOnlyAccounts = async (
                 skipped: res.skipped,
                 refreshed: res.refreshed,
                 updated: res.updated,
-                failed: res.failed,
+                failed: res.failed + failures.length,
                 snapshot: res.snapshot,
-                results: res.results.map((item) => ({
+                results: [
+                    ...res.results.map((item) => ({
                     address: item.address,
                     imported: item.imported,
                     error: item.error,
-                })),
+                    })),
+                    ...failures.map((item) => ({ address: item.address, imported: false, error: item.error })),
+                ],
             },
         };
     } catch (error: unknown) {

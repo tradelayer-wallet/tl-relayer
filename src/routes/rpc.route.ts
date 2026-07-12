@@ -1,9 +1,51 @@
 import { FastifyInstance } from "fastify";
-import { callAllocatedRpc, callRpc, importPubKey } from "../services/address.service";
-import { listunspent } from "../services/sochain.service";
+import { callAllocatedRpc, callRpc } from "../services/address.service";
 import { recordTradeLayerRpcSnapshot } from "../services/watchonly-registry.service";
-import { ELogType, saveLog } from "../services/utils.service";
 import { Encode } from "../services/txEncoder";
+
+const PUBLIC_RPC_METHODS = new Set([
+  'tl_getstatesnapshot',
+  'tl_watchonly_register',
+  'tl_watchonly_utxos',
+  'tl_getsyncstatus',
+  'tl_getallbalancesforaddress',
+  'tl_getchannel',
+  'tl_getchannelcolumn',
+  'tl_getcontractinfo',
+  'tl_getattestations',
+  'tl_gettransaction',
+  'tl_getclearlistbyid',
+  'tl_listcontractseries',
+  'tl_getinitmargin',
+  'tl_channelbalanceforcommiter',
+  'tl_getmaxsynth',
+  'tl_contractposition',
+  'tl_tokentradehistoryforaddress',
+  'tl_contracttradehistoryforaddress',
+  'tl_totaltradehistoryforaddress',
+  'tl_getinfo',
+  'tl_getbalance',
+  'tl_getproperty',
+  'tl_listproperties',
+  'tl_createpayload_attestation',
+  'tl_createpayload_commit_tochannel',
+]);
+
+const ALLOWED_PAYLOAD_ENCODERS: Record<string, keyof typeof Encode> = {
+  attestation: 'encodeAttestation',
+  issueorrevokeattestation: 'encodeAttestation',
+  commit: 'encodeCommit',
+  commitchannel: 'encodeCommit',
+  commit_tochannel: 'encodeCommit',
+};
+
+function normalizeRpcMethod(method: unknown): string {
+  return String(method || '').trim().toLowerCase();
+}
+
+function sendRpcError(reply: any, statusCode: number, code: string, message: string) {
+  reply.code(statusCode).send({ error: { code, message } });
+}
 
 // -----------------------------------------------------------------------------
 // Route registration
@@ -34,16 +76,15 @@ async function handlePayload(request: any, reply: any) {
     };
 
     if (!params || typeof params.type !== "string") {
-      reply.code(400).send({ error: "Missing or invalid params.type" });
+      sendRpcError(reply, 400, 'BAD_PAYLOAD_REQUEST', 'Missing or invalid params.type');
       return;
     }
 
-    const encoderType =
-      "encode" + params.type.charAt(0).toUpperCase() + params.type.slice(1);
+    const encoderType = ALLOWED_PAYLOAD_ENCODERS[normalizeRpcMethod(params.type)];
 
-    const fn = (Encode as any)[encoderType];
+    const fn = encoderType ? (Encode as any)[encoderType] : undefined;
     if (typeof fn !== "function") {
-      reply.code(400).send({ error: `Encoder ${encoderType} not found` });
+      sendRpcError(reply, 403, 'PAYLOAD_TYPE_FORBIDDEN', 'Payload type is not available on the public mesh');
       return;
     }
 
@@ -156,48 +197,6 @@ async function handleGetChannelColumn(request: any, reply: any) {
 // Generic RPC handler (merged from old router)
 // -----------------------------------------------------------------------------
 
-const allowedMethods = [
-  "tl_getallbalancesforaddress",
-  "tl_getstatesnapshot",
-  "tl_listproperties",
-  "tl_getproperty",
-  "tl_list_attestation",
-  "tl_getbalance",
-  "tl_getinfo",
-  "tl_getclearlistbyid",
-  "tl_gettransaction",
-  "tl_listcontractseries",
-  "tl_getattestations",
-  "tl_getchannelcolumn",
-  "tl_createrawtx_opreturn",
-  "tl_createrawtx_reference",
-  "tl_check_kyc",
-  "tl_check_commits",
-  "tl_listnodereward_addresses",
-  "tl_contractPosition",
-  "tl_decodetransaction",
-  "tl_tokenTradeHistoryForAddress",
-  "tl_contractTradeHistoryForAddress",
-  "tl_channelBalanceForCommiter",
-  "tl_getMaxSynth",
-  "tl_createpayload_commit_tochannel",
-  "tl_createpayload_withdrawal_fromchannel",
-  "tl_createpayload_simplesend",
-  "tl_createpayload_attestation",
-  "tl_createpayload_instant_ltc_trade",
-  "tl_createpayload_instant_trade",
-  "tl_createpayload_contract_instant_trade",
-  "tl_createpayload_sendactivation",
-  "tl_totalTradeHistoryForAddress",
-  "tl_getChannel",
-  "tl_getInitMargin",
-  "tl_getContractInfo",
-  "sendrawtransaction",
-  "validateaddress",
-  "addmultisigaddress",
-  "getrawmempool",
-].map((method) => method.toLowerCase());
-
 function logPortfolioHeartbeat(event: string, details: Record<string, unknown>) {
   console.log(`[portfolio-heartbeat][relayer][rpc-route] ${event}`, details);
 }
@@ -287,27 +286,33 @@ async function handleAllocatedRpc(request: any, reply: any) {
     const timeoutMs = Number(body.timeoutMs);
     const preferredProviderNodeId = String(body.preferredProviderNodeId || providerNodeId || '').trim() || undefined;
 
-    if (!method) {
-      reply.code(400).send({ error: "Missing method" });
+    const normalizedMethod = normalizeRpcMethod(method);
+    if (!normalizedMethod) {
+      sendRpcError(reply, 400, 'BAD_RPC_REQUEST', 'Missing method');
+      return;
+    }
+    if (!PUBLIC_RPC_METHODS.has(normalizedMethod)) {
+      sendRpcError(reply, 403, 'RPC_METHOD_FORBIDDEN', 'RPC method is not available on the public mesh');
       return;
     }
 
     console.log('[portfolio-heartbeat][relayer][rpc-route] allocated request', {
-      method,
+      method: normalizedMethod,
       providerNodeId: preferredProviderNodeId || null,
       network: network || null,
       service: service || null,
       paramsCount: params.length,
     });
 
-    const res = await callAllocatedRpc(method, params, {
+    const res = await callAllocatedRpc(normalizedMethod, params, {
       preferredProviderNodeId,
       network,
       service,
       timeoutMs: Number.isFinite(timeoutMs) ? timeoutMs : undefined,
     });
     if (res.error) {
-      reply.code(502).send({ error: res.error });
+      const noProvider = /no WebRTC RPC provider/i.test(String(res.error));
+      sendRpcError(reply, noProvider ? 503 : 502, noProvider ? 'NO_RPC_PROVIDER' : 'RPC_UPSTREAM_ERROR', String(res.error));
       return;
     }
     reply.send(res);
@@ -327,7 +332,11 @@ logPortfolioHeartbeat('incoming', {
 
   try {
     const { method } = request.params as { method: string };
-    const normalizedMethod = String(method || '').trim().toLowerCase();
+    const normalizedMethod = normalizeRpcMethod(method);
+    if (!PUBLIC_RPC_METHODS.has(normalizedMethod)) {
+      sendRpcError(reply, 403, 'RPC_METHOD_FORBIDDEN', 'RPC method is not available on the public mesh');
+      return;
+    }
     let params: any[] = Array.isArray(request.body?.params)
       ? request.body.params
       : [];
@@ -354,54 +363,6 @@ logPortfolioHeartbeat('incoming', {
     }
 
     // --- special cases ---
-
-    if (normalizedMethod === "listunspent") {
-      const [minconf, maxconf, filter] = params;
-      logPortfolioHeartbeat('listunspent-request', {
-        minconf,
-        maxconf,
-        address: String(filter?.address || '').trim(),
-        hasPubkey: !!filter?.pubkey,
-      });
-
-      if (
-        typeof minconf !== "number" ||
-        typeof maxconf !== "number" ||
-        typeof filter !== "object" ||
-        !filter?.address
-      ) {
-        reply.code(400).send({ error: "Invalid listunspent params" });
-        return;
-      }
-
-      const typedParams: [number, number, { address: string; pubkey?: string }] = [
-        minconf,
-        maxconf,
-        filter,
-      ];
-
-      const res = await listunspent(request.server, typedParams);
-      logPortfolioHeartbeat('listunspent-response', {
-        hasError: !!res?.error,
-        count: Array.isArray(res?.data) ? res.data.length : 0,
-      });
-      if (!res?.error) {
-        await recordRouteTradeLayerState({
-          method: 'listunspent',
-          payload: res.data,
-          address: String(filter?.address || '').trim(),
-          summary: {
-            minconf,
-            maxconf,
-            count: Array.isArray(res.data) ? res.data.length : 0,
-          },
-          route: '/address/utxo',
-        });
-      }
-      reply.send(res);
-      return;
-    }
-
 
     if (normalizedMethod === "tl_getcontractinfo") {
       const contractId = Number(raw?.contractId);
@@ -554,14 +515,11 @@ logPortfolioHeartbeat('incoming', {
 
     // --- default passthrough ---
 
-    if (!allowedMethods.includes(normalizedMethod)) {
-      reply.code(400).send({ error: `${method} not allowed` });
-      return;
-    }
-
     const res = await callRpc(normalizedMethod, ...params);
-    if (normalizedMethod === "sendrawtransaction" && res?.data) {
-      saveLog(ELogType.TXIDS, res.data);
+    if (res?.error) {
+      const noProvider = /no WebRTC RPC provider/i.test(String(res.error));
+      sendRpcError(reply, noProvider ? 503 : 502, noProvider ? 'NO_RPC_PROVIDER' : 'RPC_UPSTREAM_ERROR', String(res.error));
+      return;
     }
     if (normalizedMethod === 'tl_getallbalancesforaddress' || normalizedMethod === 'tl_listproperties' || normalizedMethod === 'tl_getproperty') {
       logPortfolioHeartbeat('mapped-response', {
