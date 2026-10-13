@@ -20,6 +20,17 @@ const parsePort = (value: string | undefined, fallback: number) => {
     return Number.isFinite(parsed) ? parsed : fallback;
 };
 
+const parseBool = (value: string | undefined) => {
+    const normalized = String(value || '').trim().toLowerCase();
+    return normalized === '1' || normalized === 'true';
+};
+
+const parseCsv = (value: string | undefined) =>
+    String(value || '')
+        .split(',')
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+
 export const envConfig: {
     SERVER_PORT: number;
     SOCKET_PORT: number;
@@ -43,6 +54,14 @@ export const envConfig: {
     WATCH_RPC_PORT: number;
     WATCHONLY_REGISTRY_PATH: string;
     WATCHONLY_RECONCILE_INTERVAL_MS: number;
+    WATCHONLY_BOOTSTRAP_URL: string;
+    ALLOW_INSECURE_BOOTSTRAP: boolean;
+    RELAYER_API_KEY: string;
+    ADMIN_API_KEY: string;
+    FAUCET_ENABLED: boolean;
+    CORS_ORIGINS: string[];
+    TRUST_PROXY: boolean;
+    BLOCKCYPHER_TOKEN: string;
     VPN_KEYS: {
         VPN_CRIMINALIP: string;
         VPN_IPHUB: string;
@@ -73,6 +92,14 @@ export const envConfig: {
     WATCH_RPC_PORT: parsePort(process.env.WATCH_RPC_PORT || process.env.RPC_PORT, 9332),
     WATCHONLY_REGISTRY_PATH: process.env.WATCHONLY_REGISTRY_PATH || 'state/watchonly-registry.json',
     WATCHONLY_RECONCILE_INTERVAL_MS: parseInt(process.env.WATCHONLY_RECONCILE_INTERVAL_MS || '300000', 10),
+    WATCHONLY_BOOTSTRAP_URL: String(process.env.WATCHONLY_BOOTSTRAP_URL || process.env.TL_WATCHONLY_BOOTSTRAP_URL || '').trim(),
+    ALLOW_INSECURE_BOOTSTRAP: parseBool(process.env.ALLOW_INSECURE_BOOTSTRAP),
+    RELAYER_API_KEY: String(process.env.RELAYER_API_KEY || '').trim(),
+    ADMIN_API_KEY: String(process.env.ADMIN_API_KEY || '').trim(),
+    FAUCET_ENABLED: parseBool(process.env.FAUCET_ENABLED),
+    CORS_ORIGINS: parseCsv(process.env.CORS_ORIGINS),
+    TRUST_PROXY: parseBool(process.env.TRUST_PROXY),
+    BLOCKCYPHER_TOKEN: String(process.env.BLOCKCYPHER_TOKEN || '').trim(),
     VPN_KEYS: {
         VPN_CRIMINALIP: process.env.VPN_CRIMINALIP,
         VPN_IPHUB: process.env.VPN_IPHUB,

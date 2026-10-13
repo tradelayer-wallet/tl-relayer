@@ -1,6 +1,8 @@
 import { FastifyInstance, FastifyRequest } from "fastify";
 import { fundAddress, getAddressBalance, importWatchOnlyAccounts, validateAddress } from "../services/address.service";
 import { listunspent, rescanWatchOnlyAccounts, verifyWatchOnlyAccountCoverage } from "../services/sochain.service"; // Import the new function
+import { envConfig } from "../config/env.config";
+import { secureCompare, validateBootstrapSourceUrl } from "../services/security-utils.service";
 import {
     bootstrapWatchOnlyRegistryFromSeed,
     getWatchOnlyCoverage,
@@ -59,6 +61,21 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
 
     fastify.get('/faucet/:address', async (request: FastifyRequest<{ Params: { address: string } }>, reply) => {
         try {
+            // Issue #1 / C1: the faucet moves real funds out of the node wallet.
+            // Fail closed: disabled unless FAUCET_ENABLED=true explicitly opts in.
+            if (!envConfig.FAUCET_ENABLED) {
+                reply.status(403).send({ error: 'Faucet is disabled. Set FAUCET_ENABLED=true to enable it.' });
+                return;
+            }
+            if (envConfig.ADMIN_API_KEY) {
+                const providedKey = String(
+                    request.headers['x-admin-api-key'] || request.headers['x-api-key'] || ''
+                );
+                if (!secureCompare(providedKey, envConfig.ADMIN_API_KEY)) {
+                    reply.status(403).send({ error: 'Forbidden' });
+                    return;
+                }
+            }
             const { address } = request.params;
             const res = await fundAddress(address);
             reply.send(res);
@@ -219,14 +236,29 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
         ) => {
             try {
                 const body = request.body || {};
+                // Issue #1 / C2 (SSRF): the seed URL must never come from the request
+                // body. It is taken only from the environment and validated below.
+                if (body.sourceUrl) {
+                    console.warn(
+                        '[security] /address/watchonly/bootstrap: ignoring client-supplied sourceUrl; configure WATCHONLY_BOOTSTRAP_URL instead',
+                    );
+                }
+                const validated = validateBootstrapSourceUrl(
+                    envConfig.WATCHONLY_BOOTSTRAP_URL || envConfig.WATCHONLY_REGISTRY_SEED_URL,
+                    envConfig.ALLOW_INSECURE_BOOTSTRAP,
+                );
+                if (!validated.ok) {
+                    reply.status(400).send({ error: validated.error });
+                    return;
+                }
                 console.log('[portfolio-heartbeat][relayer][route] /address/watchonly/bootstrap request', {
                     ...getRequestTrace(request, '/address/watchonly/bootstrap'),
-                    sourceUrl: body.sourceUrl || null,
+                    sourceUrl: validated.sourceUrl || null,
                     network: body.network || null,
                     force: !!body.force,
                 });
                 const res = await bootstrapWatchOnlyRegistryFromSeed({
-                    sourceUrl: body.sourceUrl,
+                    sourceUrl: validated.sourceUrl || undefined,
                     network: body.network,
                     force: !!body.force,
                 });
@@ -286,6 +318,13 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
         ) => {
             try {
                 const body = request.body || {};
+                if (body.force) {
+                    // Issue #1 / C1: `force` is accepted for compatibility but no longer
+                    // bypasses the WATCHONLY_RESCAN_OPT_IN env gate.
+                    console.warn(
+                        '[security] /address/watchonly/scan/run: force:true is ignored; the WATCHONLY_RESCAN_OPT_IN env gate always applies',
+                    );
+                }
                 console.log('[portfolio-heartbeat][relayer][route] /address/watchonly/scan/run request', {
                     ...getRequestTrace(request, '/address/watchonly/scan/run'),
                     network: body.network || null,

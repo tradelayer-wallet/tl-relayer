@@ -15,6 +15,26 @@ const jsonReply = (ws: WebSocket, payload: Record<string, unknown>) => {
   ws.send(JSON.stringify(payload));
 };
 
+// Issue #1 / M2+H3: client-supplied headers that can spoof the connection
+// metadata or credentials must never reach the internal Fastify instance.
+const STRIPPED_RELAY_HEADERS = new Set([
+  "host",
+  "x-forwarded-for",
+  "x-real-ip",
+  "cf-connecting-ip",
+  "x-api-key",
+]);
+
+const buildRelayHeaders = (clientHeaders?: Record<string, string>) => {
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  for (const [key, value] of Object.entries(clientHeaders || {})) {
+    const name = String(key || "").toLowerCase();
+    if (!name || STRIPPED_RELAY_HEADERS.has(name)) continue;
+    if (typeof value === "string") headers[name] = value;
+  }
+  return headers;
+};
+
 const normalizePath = (path: string) => {
   if (!path) return "/";
   return path.startsWith("/") ? path : `/${path}`;
@@ -85,10 +105,7 @@ export class WsRelayService {
           method,
           url: targetUrl,
           payload: payload.body,
-          headers: {
-            "content-type": "application/json",
-            ...(payload.headers || {}),
-          },
+          headers: buildRelayHeaders(payload.headers),
         });
 
         const bodyText = response.payload || "";

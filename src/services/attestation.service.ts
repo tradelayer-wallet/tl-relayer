@@ -1,5 +1,6 @@
 // src/services/attestation.service.ts
 import axios from 'axios';
+import { isIP } from 'net';
 
 export interface IpAttestationResult {
   success: boolean;
@@ -60,6 +61,18 @@ export class AttestationService {
 
   async checkIp(ipAddress: string): Promise<IpAttestationResult> {
     const normalizedIp = this.normalizeIp(ipAddress);
+    // Issue #1 / H3: only well-formed IP addresses may be interpolated into
+    // outbound provider URLs; anything else is rejected before any call is made.
+    if (!isIP(normalizedIp)) {
+      return this.withLegacyAttestation({
+        success: false,
+        ip: normalizedIp,
+        isBlocked: false,
+        source: 'unknown',
+        message: 'Invalid IP address',
+        error: 'Invalid IP address',
+      });
+    }
     const cached = this.getCached(normalizedIp);
     if (cached) return cached;
 
@@ -120,6 +133,8 @@ export class AttestationService {
   }
 
   private async lookupIpInfo(ipAddress: string): Promise<IpInfoLookup | null> {
+    // Issue #1 / H3: never interpolate an unvalidated IP into the outbound URL.
+    if (!isIP(this.normalizeIp(ipAddress))) return null;
     try {
       const tokenQuery = this.IPINFO_TOKEN ? `?token=${this.IPINFO_TOKEN}` : '';
       const url = `https://ipinfo.io/${ipAddress}/json${tokenQuery}`;
@@ -142,6 +157,8 @@ export class AttestationService {
 
   private async lookupCriminalIp(ipAddress: string): Promise<CriminalIpLookup | null> {
     if (!this.CRIMINAL_IP_API_KEY) return null;
+    // Issue #1 / H3: never interpolate an unvalidated IP into the outbound URL.
+    if (!isIP(this.normalizeIp(ipAddress))) return null;
 
     try {
       const primaryUrl =
@@ -214,6 +231,8 @@ export class AttestationService {
   }
 
   private async lookupIpApiCountryCode(ipAddress: string): Promise<string | null> {
+    // Issue #1 / H3: never interpolate an unvalidated IP into the outbound URL.
+    if (!isIP(this.normalizeIp(ipAddress))) return null;
     try {
       const url = `http://ip-api.com/json/${ipAddress}?fields=status,countryCode,message`;
       const resp = await axios.get(url, { timeout: 5000 });
