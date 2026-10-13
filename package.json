@@ -7,6 +7,7 @@
     "build": "cross-env NODE_OPTIONS=--openssl-legacy-provider webpack --mode=development",
     "build:watch": "webpack -w --mode=development",
     "verify:routed-watchonly": "node scripts/verify-routed-watchonly-flow.cjs",
+    "verify:round2-hardening": "node scripts/verify-round2-hardening.cjs",
     "start": "node ./dist/index.js",
     "start:watch": "nodemon ./dist/index.js"
   },
