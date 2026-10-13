@@ -111,9 +111,15 @@ const isBlockedIpv6Groups = (groups: number[]): boolean => {
     if ((first & 0xffc0) === 0xfec0) return true;                            // fec0::/10 site-local (deprecated)
     if ((first & 0xff00) === 0xff00) return true;                            // ff00::/8 multicast
     if (first === 0x64 && groups[1] === 0xff9b) return true;                 // 64:ff9b::/32 NAT64 (well-known + local-use)
-    // IPv4-mapped ::ffff:a.b.c.d (also seen in hex form ::ffff:7f00:1) and
-    // IPv4-compatible ::a.b.c.d both embed an IPv4 address in the last 32 bits.
-    if ((isZeroPrefix(5) && groups[5] === 0xffff) || isZeroPrefix(6)) {
+    // IPv4-mapped ::ffff:a.b.c.d (also seen in hex form ::ffff:7f00:1), the
+    // IPv4-translated (SIIT) form ::ffff:0:a.b.c.d and the IPv4-compatible form
+    // ::a.b.c.d all embed an IPv4 address in the last 32 bits. Issue #1 round 2 /
+    // NEW-4: the SIIT form previously bypassed the IPv4 blocklist.
+    if (
+        (isZeroPrefix(5) && groups[5] === 0xffff) ||
+        (isZeroPrefix(4) && groups[4] === 0xffff && groups[5] === 0) ||
+        isZeroPrefix(6)
+    ) {
         return isBlockedIpv4(embeddedIpv4(groups[6], groups[7]));
     }
     // 6to4 2002::/16 embeds an IPv4 address in groups 1-2.
@@ -143,6 +149,145 @@ export const isBlockedBootstrapHost = (hostname: string): boolean => {
 
     // Not a literal IP address (DNS name); literal-IP checks do not apply here.
     return false;
+};
+
+/**
+ * Expands an IP literal (v4 or v6) into 8 16-bit groups in IPv4-mapped IPv6
+ * space, so v4 and v6 spellings of the same address compare uniformly.
+ */
+const ipToGroups = (ip: string): number[] | null => {
+    const host = normalizeHostname(ip);
+    const v4 = parseIpv4Octets(host);
+    if (v4) {
+        return [0, 0, 0, 0, 0, 0xffff, (v4[0] << 8) | v4[1], (v4[2] << 8) | v4[3]];
+    }
+    return expandIpv6Groups(host);
+};
+
+type CidrEntry = { network: number[]; bits: number };
+
+/** Canonical text form of an IP literal; IPv4-mapped IPv6 is shown as IPv4. */
+const canonicalIp = (ip: string): string | null => {
+    const host = normalizeHostname(ip);
+    if (!isIP(host)) return null;
+    const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(host);
+    return mapped ? mapped[1] : host;
+};
+
+/**
+ * Parses an `ip` or `ip/prefix` entry into IPv4-mapped IPv6 space, where IPv4
+ * networks sit at ::ffff:0:0/96 (so `10.0.0.0/8` is compared as a 104-bit
+ * prefix). Returns null for anything that is not a well-formed address or prefix.
+ */
+const parseCidr = (entry: string): CidrEntry | null => {
+    const raw = String(entry || '').trim();
+    const slash = raw.indexOf('/');
+    const netPart = slash === -1 ? raw : raw.slice(0, slash);
+    const version = isIP(netPart);
+    if (!version) return null;
+    const maxPrefix = version === 4 ? 32 : 128;
+    let prefix = maxPrefix;
+    if (slash !== -1) {
+        const suffix = raw.slice(slash + 1);
+        if (!/^\d{1,3}$/.test(suffix)) return null;
+        prefix = Number(suffix);
+        if (prefix > maxPrefix) return null;
+    }
+    const network = ipToGroups(netPart);
+    if (!network) return null;
+    return { network, bits: version === 4 ? prefix + 96 : prefix };
+};
+
+/** True when a TRUST_PROXY_CIDRS entry is a well-formed IP or CIDR. */
+export const isValidProxyCidr = (entry: string): boolean => parseCidr(entry) !== null;
+
+/**
+ * Membership test for an IP literal against an `ip` or `ip/prefix` entry. An
+ * IPv4 peer matches IPv4 entries in either spelling (`10.1.2.3` or
+ * `::ffff:10.1.2.3`).
+ */
+export const isIpInCidr = (ip: string, entry: string): boolean => {
+    const network = parseCidr(entry);
+    const groups = ipToGroups(ip);
+    if (!network || !groups) return false;
+    let remaining = network.bits;
+    for (let i = 0; i < 8 && remaining > 0; i += 1) {
+        const mask = remaining >= 16 ? 0xffff : (0xffff << (16 - remaining)) & 0xffff;
+        if ((groups[i] & mask) !== (network.network[i] & mask)) return false;
+        remaining -= 16;
+    }
+    return true;
+};
+
+/** True when a TCP peer address is inside one of the trusted proxy entries. */
+export const isTrustedProxyPeer = (peerAddress: string, trustedProxies: string[]): boolean =>
+    trustedProxies.some((entry) => isIpInCidr(peerAddress, entry));
+
+/**
+ * The single trusted-client-IP resolver (issue #1 round 2 / NEW-2). Anything
+ * that depends on the caller's IP must go through this function.
+ *
+ * Forwarding headers are believed only when the direct TCP peer is inside
+ * `trustedProxies`; otherwise the peer address is returned and headers are
+ * ignored. For a trusted peer, `cf-connecting-ip` and then `x-real-ip` are used
+ * when present. Otherwise X-Forwarded-For is walked right to left, skipping
+ * trusted proxy hops, and the first untrusted hop is the client. A malformed or
+ * repeated forwarding header fails closed to the peer address. Returns '' when
+ * no usable address exists.
+ */
+export const resolveClientIp = (
+    peerAddress: string | undefined,
+    headers: Record<string, string | string[] | undefined>,
+    trustedProxies: string[],
+): string => {
+    const peer = canonicalIp(String(peerAddress || '')) || '';
+    if (!peer || !isTrustedProxyPeer(peer, trustedProxies)) return peer;
+
+    for (const name of ['cf-connecting-ip', 'x-real-ip']) {
+        const value = headers[name];
+        if (value === undefined || String(value).trim() === '') continue;
+        return typeof value === 'string' ? canonicalIp(value) || peer : peer;
+    }
+
+    const xff = headers['x-forwarded-for'];
+    if (xff === undefined || String(xff).trim() === '') return peer;
+    if (typeof xff !== 'string') return peer;
+    const hops = xff.split(',').map((hop) => canonicalIp(hop));
+    if (hops.some((hop) => hop === null)) return peer;
+    const chain = hops as string[];
+    for (let i = chain.length - 1; i >= 0; i -= 1) {
+        if (!isTrustedProxyPeer(chain[i], trustedProxies)) return chain[i];
+    }
+    return chain[0];
+};
+
+/**
+ * Credential-bearing query parameter names (issue #1 round 2 / NEW-3). `?apiKey=`
+ * is accepted on the WS handshake for browser compatibility, so these values must
+ * be redacted before any URL is logged and removed before a URL is dispatched
+ * internally.
+ */
+const SENSITIVE_QUERY_PARAM_KEYS = new Set(['apikey', 'api_key', 'api-key', 'token', 'access_token']);
+
+/**
+ * Returns the URL with credential-bearing query values replaced by `REDACTED`
+ * (mode `redact`, for log lines) or deleted (mode `remove`, for internal dispatch).
+ */
+export const scrubSensitiveQuery = (rawUrl: string, mode: 'redact' | 'remove'): string => {
+    const value = String(rawUrl || '');
+    const qIndex = value.indexOf('?');
+    if (qIndex === -1) return value;
+    const params = new URLSearchParams(value.slice(qIndex + 1));
+    const sensitive: string[] = [];
+    params.forEach((_value, key) => {
+        if (SENSITIVE_QUERY_PARAM_KEYS.has(key.trim().toLowerCase())) sensitive.push(key);
+    });
+    for (const key of sensitive) {
+        if (mode === 'redact') params.set(key, 'REDACTED');
+        else params.delete(key);
+    }
+    const qs = params.toString();
+    return qs ? `${value.slice(0, qIndex)}?${qs}` : value.slice(0, qIndex);
 };
 
 export type BootstrapUrlValidation = {

@@ -2,7 +2,12 @@ import Fastify, { FastifyInstance, FastifyReply, FastifyRequest, FastifyServerOp
 import { handleRoutes } from './routes/routes';
 import { handleRpcConnection } from './config/rpc.config';
 import { envConfig } from './config/env.config';
-import { isInternalRelayRequest, secureCompare } from './services/security-utils.service';
+import {
+    isInternalRelayRequest,
+    isValidProxyCidr,
+    scrubSensitiveQuery,
+    secureCompare,
+} from './services/security-utils.service';
 import { WsRelayService } from './services/ws-relay.service';
 import { startWatchOnlyRegistryReconciliation } from './services/watchonly-registry.service';
 
@@ -24,14 +29,23 @@ const PUBLIC_UNSAFE_ROUTES = new Set([
 
 // Safe-method (GET/HEAD) routes that still require the key: they change state
 // or move funds despite being reads.
-const isProtectedGetRoute = (path: string): boolean =>
-    path === '/address/faucet' || path.indexOf('/address/faucet/') === 0;
+const isFaucetRoute = (route: string): boolean =>
+    route === '/address/faucet' || route.indexOf('/address/faucet/') === 0;
 
-const isProtectedRoute = (method: string, path: string): boolean => {
+// Issue #1 round 2 / NEW-1: the policy is keyed on the matched route template
+// (`request.routeOptions.url`, e.g. `/address/faucet/:address`), which is the
+// exact value Fastify's router dispatches on. The raw request target is never
+// compared: it can be absolute-form (`GET http://evil.example/address/faucet/x`)
+// or percent-encoded (`/address/%66aucet/x`), and a string check on it can
+// disagree with the router. `null` means no route matched (the 404 handler runs).
+const matchedRoute = (request: FastifyRequest): string | null => request.routeOptions.url || null;
+
+const isProtectedRoute = (method: string, route: string | null): boolean => {
     const verb = String(method || '').toUpperCase();
     if (verb === 'OPTIONS') return false;
-    if (SAFE_HTTP_METHODS.has(verb)) return isProtectedGetRoute(path);
-    return !PUBLIC_UNSAFE_ROUTES.has(path);
+    if (SAFE_HTTP_METHODS.has(verb)) return route !== null && isFaucetRoute(route);
+    // Unmatched non-safe requests stay protected (fail closed).
+    return route === null || !PUBLIC_UNSAFE_ROUTES.has(route);
 };
 
 class FastifyServer {
@@ -76,6 +90,22 @@ class FastifyServer {
                 '[security] FAUCET_ENABLED=true requires ADMIN_API_KEY to be set; refusing to start because the faucet would be unauthenticated.',
             );
         }
+        // Issue #1 round 2 / NEW-2: forwarding headers are believed only when the
+        // TCP peer is inside TRUST_PROXY_CIDRS (see resolveClientIp). Misconfigured
+        // trust is a startup error, never a silent fallback to trusting every peer.
+        const cidrs = envConfig.TRUST_PROXY_CIDRS;
+        const invalidCidrs = cidrs.filter((entry) => !isValidProxyCidr(entry));
+        if (invalidCidrs.length > 0) {
+            this.stop(`[security] TRUST_PROXY_CIDRS has invalid entries: ${invalidCidrs.join(', ')}`);
+        }
+        if (envConfig.TRUST_PROXY && cidrs.length === 0) {
+            this.stop(
+                '[security] TRUST_PROXY=1 requires TRUST_PROXY_CIDRS (comma-separated IPs/CIDRs of your reverse proxies); refusing to start because forwarding headers would otherwise be trusted from any client.',
+            );
+        }
+        if (!envConfig.TRUST_PROXY && cidrs.length > 0) {
+            console.warn('[security] TRUST_PROXY_CIDRS is set but TRUST_PROXY is not enabled; forwarding headers are ignored.');
+        }
     }
 
     private handleSockets() {
@@ -99,17 +129,28 @@ class FastifyServer {
             return;
         }
         this.server.addHook('onRequest', async (request: FastifyRequest, reply: FastifyReply) => {
-            const path = String(request.url || '').split('?')[0];
-            if (!isProtectedRoute(request.method, path)) return;
+            const route = matchedRoute(request);
+            if (!isProtectedRoute(request.method, route)) return;
             // In-process WS relay: the client key was validated once at WS
             // handshake, and the relay presents the per-process internal marker
             // on its app.inject path (see security-utils.service.ts).
             if (isInternalRelayRequest(request.headers)) return;
-            const provided = String(request.headers['x-api-key'] || '');
-            if (!provided || !secureCompare(provided, apiKey)) {
-                reply.code(401).send({ error: 'Missing or invalid x-api-key header' });
-                return reply;
-            }
+            // Issue #1 round 2 / NEW-6: on the faucet either configured key may be
+            // presented in either credential header, so an operator holding only
+            // ADMIN_API_KEY does not also need RELAYER_API_KEY. The faucet handler
+            // still requires ADMIN_API_KEY itself before moving funds.
+            const isFaucet = route !== null && isFaucetRoute(route);
+            const acceptedKeys = isFaucet ? [apiKey, envConfig.ADMIN_API_KEY] : [apiKey];
+            const presentedKeys = isFaucet
+                ? [request.headers['x-api-key'], request.headers['x-admin-api-key']]
+                : [request.headers['x-api-key']];
+            const authorized = presentedKeys.some((header) => {
+                const presented = String(header || '');
+                return acceptedKeys.some((expected) => !!expected && !!presented && secureCompare(presented, expected));
+            });
+            if (authorized) return;
+            reply.code(401).send({ error: 'Missing or invalid x-api-key header' });
+            return reply;
         });
     }
 
@@ -140,6 +181,17 @@ class FastifyServer {
 
 
 const port = envConfig.SERVER_PORT;
-const options: FastifyServerOptions = { logger: true };
+// Issue #1 round 2 / NEW-3: `?apiKey=` stays accepted on the WS handshake for
+// browser compatibility, so request log lines must not carry its value.
+const options: FastifyServerOptions = {
+    logger: {
+        serializers: {
+            req: (req: { method?: string; url?: string }) => ({
+                method: req.method,
+                url: scrubSensitiveQuery(req.url || '', 'redact'),
+            }),
+        },
+    },
+};
 const myServer = new FastifyServer(port, options);
 myServer.start();

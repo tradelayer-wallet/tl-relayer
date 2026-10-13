@@ -1,6 +1,21 @@
 // src/services/attestation.service.ts
-import axios from 'axios';
+import axios, { AxiosResponse } from 'axios';
 import { isIP } from 'net';
+import { envConfig } from '../config/env.config';
+
+// Issue #1 round 2 / NEW-5: the single outbound path for reputation providers.
+// axios's own `timeout` only bounds socket inactivity, so a stalled DNS lookup
+// or a slow-drip body can outlive it. The AbortController enforces a wall-clock
+// deadline over the whole request. Failures reject, as with plain axios.
+const providerGet = async (url: string, headers?: Record<string, string>): Promise<AxiosResponse> => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), envConfig.ATTESTATION_PROVIDER_TIMEOUT_MS);
+  try {
+    return await axios.get(url, { headers, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+};
 
 export interface IpAttestationResult {
   success: boolean;
@@ -138,7 +153,7 @@ export class AttestationService {
     try {
       const tokenQuery = this.IPINFO_TOKEN ? `?token=${this.IPINFO_TOKEN}` : '';
       const url = `https://ipinfo.io/${ipAddress}/json${tokenQuery}`;
-      const resp = await axios.get(url, { timeout: 8000 });
+      const resp = await providerGet(url);
       if (resp.status !== 200 || !resp.data) return null;
 
       const data = resp.data as any;
@@ -163,11 +178,8 @@ export class AttestationService {
     try {
       const primaryUrl =
         `https://api.criminalip.io/v1/asset/ip/report?ip=${ipAddress}`;
-      const response = await axios.get(primaryUrl, {
-        headers: {
-          'x-api-key': this.CRIMINAL_IP_API_KEY,
-        },
-        timeout: 8000,
+      const response = await providerGet(primaryUrl, {
+        'x-api-key': this.CRIMINAL_IP_API_KEY,
       });
 
       if (response.status !== 200 || !response.data) return null;
@@ -235,7 +247,7 @@ export class AttestationService {
     if (!isIP(this.normalizeIp(ipAddress))) return null;
     try {
       const url = `http://ip-api.com/json/${ipAddress}?fields=status,countryCode,message`;
-      const resp = await axios.get(url, { timeout: 5000 });
+      const resp = await providerGet(url);
       if (resp.status !== 200 || !resp.data) return null;
       const data = resp.data as any;
       if (data.status && data.status !== 'success') return null;

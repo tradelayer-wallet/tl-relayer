@@ -31,6 +31,18 @@ const parseCsv = (value: string | undefined) =>
         .map((entry) => entry.trim())
         .filter(Boolean);
 
+// Strict integer setting for the security knobs: a malformed or out-of-range
+// value stops startup with a clear message instead of silently taking a default.
+const parseStrictInt = (name: string, value: string | undefined, fallback: number, min: number): number => {
+    const raw = String(value ?? '').trim();
+    if (raw === '') return fallback;
+    const parsed = Number(raw);
+    if (!/^\d+$/.test(raw) || parsed < min) {
+        throw new Error(`[config] ${name} must be an integer >= ${min}, got "${raw}"`);
+    }
+    return parsed;
+};
+
 export const envConfig: {
     SERVER_PORT: number;
     SOCKET_PORT: number;
@@ -61,6 +73,11 @@ export const envConfig: {
     FAUCET_ENABLED: boolean;
     CORS_ORIGINS: string[];
     TRUST_PROXY: boolean;
+    TRUST_PROXY_CIDRS: string[];
+    ATTESTATION_ALLOW_IP_OVERRIDE: boolean;
+    ATTESTATION_RATE_LIMIT_PER_MIN: number;
+    ATTESTATION_MAX_IN_FLIGHT: number;
+    ATTESTATION_PROVIDER_TIMEOUT_MS: number;
     BLOCKCYPHER_TOKEN: string;
     VPN_KEYS: {
         VPN_CRIMINALIP: string;
@@ -99,6 +116,11 @@ export const envConfig: {
     FAUCET_ENABLED: parseBool(process.env.FAUCET_ENABLED),
     CORS_ORIGINS: parseCsv(process.env.CORS_ORIGINS),
     TRUST_PROXY: parseBool(process.env.TRUST_PROXY),
+    TRUST_PROXY_CIDRS: parseCsv(process.env.TRUST_PROXY_CIDRS),
+    ATTESTATION_ALLOW_IP_OVERRIDE: parseBool(process.env.ATTESTATION_ALLOW_IP_OVERRIDE),
+    ATTESTATION_RATE_LIMIT_PER_MIN: parseStrictInt('ATTESTATION_RATE_LIMIT_PER_MIN', process.env.ATTESTATION_RATE_LIMIT_PER_MIN, 10, 1),
+    ATTESTATION_MAX_IN_FLIGHT: parseStrictInt('ATTESTATION_MAX_IN_FLIGHT', process.env.ATTESTATION_MAX_IN_FLIGHT, 5, 1),
+    ATTESTATION_PROVIDER_TIMEOUT_MS: parseStrictInt('ATTESTATION_PROVIDER_TIMEOUT_MS', process.env.ATTESTATION_PROVIDER_TIMEOUT_MS, 5000, 250),
     BLOCKCYPHER_TOKEN: String(process.env.BLOCKCYPHER_TOKEN || '').trim(),
     VPN_KEYS: {
         VPN_CRIMINALIP: process.env.VPN_CRIMINALIP,

@@ -5,6 +5,7 @@ import { envConfig } from "../config/env.config";
 import {
   INTERNAL_RELAY_AUTH_HEADER,
   INTERNAL_RELAY_AUTH_TOKEN,
+  scrubSensitiveQuery,
   secureCompare,
 } from "./security-utils.service";
 
@@ -23,16 +24,16 @@ const jsonReply = (ws: WebSocket, payload: Record<string, unknown>) => {
 
 // Issue #1 / M2+H3: client-supplied headers that can spoof the connection
 // metadata or credentials must never reach the internal Fastify instance.
-// This includes every credential-bearing header (fix for strip-list gaps:
-// x-admin-api-key, authorization, cookie) and the server-internal relay
-// marker, which only this process may present.
+// The WS handshake is the credential gate for this surface, so the client's
+// x-api-key is not forwarded (the relay presents its own internal marker
+// instead). x-admin-api-key is forwarded on purpose (issue #1 round 2 / NEW-6):
+// the faucet needs it, and the faucet handler verifies it.
 const STRIPPED_RELAY_HEADERS = new Set([
   "host",
   "x-forwarded-for",
   "x-real-ip",
   "cf-connecting-ip",
   "x-api-key",
-  "x-admin-api-key",
   "authorization",
   "cookie",
   INTERNAL_RELAY_AUTH_HEADER,
@@ -86,6 +87,11 @@ export class WsRelayService {
       // headers, so the key may arrive as `x-api-key` or as an `apiKey` query
       // parameter on the upgrade URL.
       if (!this.isHandshakeAuthorized(req, url)) {
+        // Issue #1 round 2 / NEW-3: the request target is logged only with its
+        // credential query values redacted.
+        console.warn(
+          `[security] WS handshake rejected for ${scrubSensitiveQuery(req.url || url.pathname, "redact")}`
+        );
         const body = JSON.stringify({ error: "Missing or invalid x-api-key header" });
         socket.write(
           "HTTP/1.1 401 Unauthorized\r\n" +
@@ -108,6 +114,12 @@ export class WsRelayService {
   private isHandshakeAuthorized(req: IncomingMessage, url: URL): boolean {
     const apiKey = envConfig.RELAYER_API_KEY;
     if (!apiKey) return true;
+    // Issue #1 round 2 / NEW-3: browsers cannot set WebSocket request headers,
+    // so `?apiKey=` is accepted for compatibility. Tradeoff: a key in the URL can
+    // reach proxy/server access logs and browser history outside this process.
+    // Within this process the value is redacted from logged URLs (see
+    // scrubSensitiveQuery and the request-log serializer in index.ts); clients
+    // that can set headers should send `x-api-key` instead.
     const provided = String(
       (req.headers["x-api-key"] as string) || url.searchParams.get("apiKey") || ""
     );
@@ -143,7 +155,9 @@ export class WsRelayService {
       try {
         const method = (payload.method || (payload.body ? "POST" : "GET")).toUpperCase();
         const targetPath = normalizePath(payload.path || boundPath);
-        const targetUrl = withQuery(targetPath, payload.query);
+        // Issue #1 round 2 / NEW-3: credential-bearing query params must not reach
+        // the internal inject URL, where the Fastify request log would record them.
+        const targetUrl = scrubSensitiveQuery(withQuery(targetPath, payload.query), "remove");
 
         const response: any = await (this.app as any).inject({
           method,
