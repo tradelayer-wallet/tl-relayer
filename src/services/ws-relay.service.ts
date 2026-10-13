@@ -1,6 +1,12 @@
 import { FastifyInstance } from "fastify";
 import { IncomingMessage } from "http";
 import { WebSocketServer, WebSocket } from "ws";
+import { envConfig } from "../config/env.config";
+import {
+  INTERNAL_RELAY_AUTH_HEADER,
+  INTERNAL_RELAY_AUTH_TOKEN,
+  secureCompare,
+} from "./security-utils.service";
 
 type WsRelayRequest = {
   id?: string;
@@ -17,12 +23,19 @@ const jsonReply = (ws: WebSocket, payload: Record<string, unknown>) => {
 
 // Issue #1 / M2+H3: client-supplied headers that can spoof the connection
 // metadata or credentials must never reach the internal Fastify instance.
+// This includes every credential-bearing header (fix for strip-list gaps:
+// x-admin-api-key, authorization, cookie) and the server-internal relay
+// marker, which only this process may present.
 const STRIPPED_RELAY_HEADERS = new Set([
   "host",
   "x-forwarded-for",
   "x-real-ip",
   "cf-connecting-ip",
   "x-api-key",
+  "x-admin-api-key",
+  "authorization",
+  "cookie",
+  INTERNAL_RELAY_AUTH_HEADER,
 ]);
 
 const buildRelayHeaders = (clientHeaders?: Record<string, string>) => {
@@ -32,6 +45,10 @@ const buildRelayHeaders = (clientHeaders?: Record<string, string>) => {
     if (!name || STRIPPED_RELAY_HEADERS.has(name)) continue;
     if (typeof value === "string") headers[name] = value;
   }
+  // Issue #1 / M2: the client key is validated once at WS handshake; the
+  // internal inject path then authenticates with the per-process relay marker
+  // that the API-key hook accepts only from this in-process relay.
+  headers[INTERNAL_RELAY_AUTH_HEADER] = INTERNAL_RELAY_AUTH_TOKEN;
   return headers;
 };
 
@@ -64,10 +81,37 @@ export class WsRelayService {
       const url = this.safeParseUrl(req);
       if (!url || !url.pathname.startsWith("/ws")) return;
 
+      // Issue #1 / M2: authenticate the WS client at handshake (fix for the
+      // ws-relay auth regression). Browsers cannot set WebSocket request
+      // headers, so the key may arrive as `x-api-key` or as an `apiKey` query
+      // parameter on the upgrade URL.
+      if (!this.isHandshakeAuthorized(req, url)) {
+        const body = JSON.stringify({ error: "Missing or invalid x-api-key header" });
+        socket.write(
+          "HTTP/1.1 401 Unauthorized\r\n" +
+            "Connection: close\r\n" +
+            "Content-Type: application/json\r\n" +
+            `Content-Length: ${Buffer.byteLength(body)}\r\n` +
+            "\r\n" +
+            body
+        );
+        socket.destroy();
+        return;
+      }
+
       this.wss.handleUpgrade(req, socket, head, (ws) => {
         this.handleConnection(ws, url.pathname);
       });
     });
+  }
+
+  private isHandshakeAuthorized(req: IncomingMessage, url: URL): boolean {
+    const apiKey = envConfig.RELAYER_API_KEY;
+    if (!apiKey) return true;
+    const provided = String(
+      (req.headers["x-api-key"] as string) || url.searchParams.get("apiKey") || ""
+    );
+    return !!provided && secureCompare(provided, apiKey);
   }
 
   private safeParseUrl(req: IncomingMessage): URL | null {

@@ -1,6 +1,7 @@
 // src/routes/attestation.route.ts
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { isIP } from 'net';
+import { envConfig } from '../config/env.config';
 import { AttestationService } from '../services/attestation.service';
 
 const attestationService = new AttestationService();
@@ -9,8 +10,9 @@ type AttestationIpBody = {
   ip?: string;
 };
 
-const trustProxyHeaders = (): boolean =>
-  String(process.env.TRUST_PROXY || '').trim() === '1';
+// Issue #1 / H3: single source of truth for TRUST_PROXY parsing (env.config
+// accepts both `1` and `true`), so this cannot drift from the rest of the app.
+const trustProxyHeaders = (): boolean => envConfig.TRUST_PROXY;
 
 function extractClientIp(req: FastifyRequest): string {
   // Issue #1 / H3: forwarding headers are only trusted when the operator has

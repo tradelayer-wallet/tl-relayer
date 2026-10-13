@@ -67,14 +67,15 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
                 reply.status(403).send({ error: 'Faucet is disabled. Set FAUCET_ENABLED=true to enable it.' });
                 return;
             }
-            if (envConfig.ADMIN_API_KEY) {
-                const providedKey = String(
-                    request.headers['x-admin-api-key'] || request.headers['x-api-key'] || ''
-                );
-                if (!secureCompare(providedKey, envConfig.ADMIN_API_KEY)) {
-                    reply.status(403).send({ error: 'Forbidden' });
-                    return;
-                }
+            // Fail closed: an admin key must always be configured and matched.
+            // (Startup also refuses to run with FAUCET_ENABLED and no ADMIN_API_KEY.)
+            const adminKey = envConfig.ADMIN_API_KEY;
+            const providedKey = String(
+                request.headers['x-admin-api-key'] || request.headers['x-api-key'] || ''
+            );
+            if (!adminKey || !secureCompare(providedKey, adminKey)) {
+                reply.status(403).send({ error: 'Forbidden' });
+                return;
             }
             const { address } = request.params;
             const res = await fundAddress(address);

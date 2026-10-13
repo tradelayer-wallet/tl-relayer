@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import { randomBytes } from 'node:crypto';
 
 import { envConfig } from '../config/env.config';
+import { validateBootstrapSourceUrl } from './security-utils.service';
 import { ELogType, saveLog } from './utils.service';
 
 export interface WatchOnlyAccount {
@@ -568,8 +569,8 @@ export async function bootstrapWatchOnlyRegistryFromSeed(input?: {
     network?: string;
     force?: boolean;
 }) {
-    const sourceUrl = trimSlash(String(input?.sourceUrl || envConfig.WATCHONLY_REGISTRY_SEED_URL || ''));
-    if (!sourceUrl) {
+    const rawSourceUrl = trimSlash(String(input?.sourceUrl || envConfig.WATCHONLY_REGISTRY_SEED_URL || ''));
+    if (!rawSourceUrl) {
         return {
             imported: 0,
             refreshed: 0,
@@ -581,6 +582,18 @@ export async function bootstrapWatchOnlyRegistryFromSeed(input?: {
             sourceUrl: null,
         };
     }
+
+    // Issue #1 / C2 (defense at the sink): every caller — including the
+    // background startup/reconcile path that falls back to
+    // WATCHONLY_REGISTRY_SEED_URL — must pass the SSRF/https policy before any
+    // fetch happens. Never fetch a refused source.
+    const validated = validateBootstrapSourceUrl(rawSourceUrl, envConfig.ALLOW_INSECURE_BOOTSTRAP);
+    if (!validated.ok || !validated.sourceUrl) {
+        const message = `Bootstrap seed URL refused: ${validated.error || 'invalid source URL'}`;
+        console.warn(`[watchonly-registry] ${message} (${rawSourceUrl})`);
+        throw new Error(message);
+    }
+    const sourceUrl = validated.sourceUrl;
 
     const current = await loadWatchOnlyRegistrySnapshot();
     if (!input?.force && current.entries.length > 0) {
@@ -600,7 +613,9 @@ export async function bootstrapWatchOnlyRegistryFromSeed(input?: {
         ? `${sourceUrl}/address/watchonly?network=${encodeURIComponent(String(input.network))}`
         : `${sourceUrl}/address/watchonly`;
 
-    const response = await axios.get(url, { timeout: 15_000 });
+    // Issue #1 / C2: never follow redirects on the bootstrap fetch — a public
+    // https host could otherwise redirect us to an internal/metadata address.
+    const response = await axios.get(url, { timeout: 15_000, maxRedirects: 0 });
     const payload: any = response.data || {};
     const entries = Array.isArray(payload?.entries)
         ? payload.entries
