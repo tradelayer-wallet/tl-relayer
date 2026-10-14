@@ -37,9 +37,11 @@ const unitCases = () => {
       const got = resolve('10.0.0.2', { 'x-forwarded-for': '1.1.1.1, 203.0.113.9, 10.0.0.7' }, TEN);
       assert(got === '203.0.113.9', `got ${got}`);
     }],
-    ['NEW-2 trusted peer: all XFF hops trusted -> leftmost hop', () => {
+    // Round 7 / F-B2: when every hop is a trusted proxy the leftmost hop is client-controlled,
+    // so the resolver now fails closed to the TCP peer (this expectation was 10.0.0.5 before).
+    ['NEW-2 trusted peer: all XFF hops trusted -> TCP peer (fail closed, round 7)', () => {
       const got = resolve('10.0.0.2', { 'x-forwarded-for': '10.0.0.5, 10.0.0.7' }, TEN);
-      assert(got === '10.0.0.5', `got ${got}`);
+      assert(got === '10.0.0.2', `got ${got}`);
     }],
     ['NEW-2 trusted peer: malformed XFF hop fails closed to peer', () => {
       assert(resolve('10.0.0.2', { 'x-forwarded-for': '1.1.1.1, garbage, 10.0.0.7' }, TEN) === '10.0.0.2', 'malformed hop not failed closed');

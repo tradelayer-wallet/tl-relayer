@@ -99,13 +99,13 @@ class FastifyServer {
         if (invalidCidrs.length > 0) {
             this.stop(`[security] TRUST_PROXY_CIDRS has invalid entries: ${invalidCidrs.join(', ')}`);
         }
-        // Round 6 / F-A3: an entry that covers every IPv4 address (0.0.0.0/0, ::/0) makes
-        // any client a "trusted proxy" and lets it choose its own IP. Refuse unless the
-        // operator sets TRUST_PROXY_ALLOW_BROAD_CIDRS=1 explicitly.
+        // Round 6 / F-A3, round 7 / F-B1: an entry that covers every IPv4 address (0.0.0.0/0,
+        // ::/0) or is broader than /8 (IPv4) or /16 (IPv6) lets a large share of clients choose
+        // their own IP. Refuse unless the operator sets TRUST_PROXY_ALLOW_BROAD_CIDRS=1 explicitly.
         const broadCidrs = cidrs.filter((entry) => isBroadProxyCidr(entry));
         if (broadCidrs.length > 0 && !envConfig.TRUST_PROXY_ALLOW_BROAD_CIDRS) {
             this.stop(
-                `[security] TRUST_PROXY_CIDRS entries cover all addresses (${broadCidrs.join(', ')}); refusing to start. Use real proxy addresses, or set TRUST_PROXY_ALLOW_BROAD_CIDRS=1 to accept this explicitly.`,
+                `[security] TRUST_PROXY_CIDRS entries are too broad to trust (${broadCidrs.join(', ')}); refusing to start. Use real proxy addresses, or set TRUST_PROXY_ALLOW_BROAD_CIDRS=1 to accept this explicitly.`,
             );
         }
         if (envConfig.TRUST_PROXY && cidrs.length === 0) {
@@ -189,6 +189,11 @@ const port = envConfig.SERVER_PORT;
 // Issue #1 round 2 / NEW-3: `?apiKey=` stays accepted on the WS handshake for
 // browser compatibility, so request log lines must not carry credential values.
 const options: FastifyServerOptions = {
+    // Round 7 / F-B5: Fastify answers HEAD by running the GET handler of every route. Several
+    // GET handlers have effects (quota and paid provider lookups on /attestation/ip, a token
+    // snapshot write on /address/balance, an external fetch on /address/watchonly/:address/verify),
+    // so HEAD is not exposed anywhere. This one option is the single enforcement point.
+    exposeHeadRoutes: false,
     logger: {
         serializers: {
             req: (req: { method?: string; url?: string }) => ({
@@ -198,5 +203,24 @@ const options: FastifyServerOptions = {
         },
     },
 };
+// Round 7 / F-B7: process-level error policy. Request-scoped failures are answered at the
+// request boundary (Fastify route handlers, the WS relay message handler), so they do not
+// get here. What does get here is logged, and then:
+// - an unhandled promise rejection keeps the relayer serving. It is one failed promise and
+//   does not corrupt shared state, and letting it exit would make a single missed catch a
+//   remote DoS lever;
+// - an uncaught exception exits with status 1, because synchronous state may be inconsistent.
+//   The supervisor restarts the process.
+// Only message and stack are logged, never the error object, because axios errors carry the
+// provider request config (URLs with tokens, API-key headers).
+process.on('unhandledRejection', (reason: unknown) => {
+    const detail = reason instanceof Error ? reason.stack || reason.message : String(reason);
+    console.error('[process] unhandled promise rejection (still serving):', detail);
+});
+process.on('uncaughtException', (error: Error) => {
+    console.error('[process] uncaught exception, exiting:', error?.stack || error?.message || 'unknown error');
+    process.exit(1);
+});
+
 const myServer = new FastifyServer(port, options);
 myServer.start();

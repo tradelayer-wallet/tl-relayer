@@ -18,6 +18,9 @@ type WsRelayRequest = {
   headers?: Record<string, string>;
 };
 
+// Methods the relayed routes use. Anything else is refused before app.inject (round 7 / F-B3).
+const WS_RELAY_METHODS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]);
+
 const jsonReply = (ws: WebSocket, payload: Record<string, unknown>) => {
   ws.send(JSON.stringify(payload));
 };
@@ -80,7 +83,13 @@ export class WsRelayService {
   private attachUpgradeHandler() {
     this.app.server.on("upgrade", (req, socket, head) => {
       const url = this.safeParseUrl(req);
-      if (!url || !url.pathname.startsWith("/ws")) return;
+      if (!url || !(url.pathname === "/ws" || url.pathname.startsWith("/ws/"))) {
+        // Round 7 / F-B4: once an 'upgrade' listener exists Node no longer destroys
+        // unclaimed upgrade sockets, so an unauthenticated Upgrade to any other path
+        // (or with an unparseable target) would stay open with no timeout.
+        socket.destroy();
+        return;
+      }
 
       // Issue #1 / M2: authenticate the WS client at handshake (fix for the
       // ws-relay auth regression). Browsers cannot set WebSocket request
@@ -164,8 +173,17 @@ export class WsRelayService {
       }
 
       const id = payload.id;
+      // Round 7 / F-B3: the method reaches app.inject, and light-my-request throws for a
+      // method outside its own allowlist from a deferred tick, which no try/catch here can
+      // catch. Any unknown method token (`\u0000`, `G ET`, a 100-char string) used to exit
+      // the whole relayer. Refuse everything outside the methods the routes use.
+      const requestedMethod = payload.method || (payload.body ? "POST" : "GET");
+      const method = typeof requestedMethod === "string" ? requestedMethod.toUpperCase() : "";
+      if (!WS_RELAY_METHODS.has(method)) {
+        jsonReply(ws, { id, ok: false, statusCode: 400, error: "Unsupported method" });
+        return;
+      }
       try {
-        const method = (payload.method || (payload.body ? "POST" : "GET")).toUpperCase();
         const targetPath = normalizePath(payload.path || boundPath);
         // Issue #1 round 2 / NEW-3: credential-bearing query params must not reach
         // the internal inject URL, where the Fastify request log would record them.

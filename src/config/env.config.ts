@@ -129,7 +129,7 @@ export const envConfig: {
     CORS_ORIGINS: parseCsv(process.env.CORS_ORIGINS),
     TRUST_PROXY: parseBool(process.env.TRUST_PROXY),
     TRUST_PROXY_CIDRS: parseCsv(process.env.TRUST_PROXY_CIDRS),
-    // Explicit opt-in for entries that cover all IPv4 (0.0.0.0/0, ::/0). Off by default (round 6 / F-A3).
+    // Explicit opt-in for broad TRUST_PROXY_CIDRS entries (all addresses, IPv4 < /8, IPv6 < /16). Off by default (round 6 / F-A3, round 7 / F-B1).
     TRUST_PROXY_ALLOW_BROAD_CIDRS: parseBool(process.env.TRUST_PROXY_ALLOW_BROAD_CIDRS),
     ATTESTATION_ALLOW_IP_OVERRIDE: parseBool(process.env.ATTESTATION_ALLOW_IP_OVERRIDE),
     ATTESTATION_RATE_LIMIT_PER_MIN: parseStrictInt('ATTESTATION_RATE_LIMIT_PER_MIN', process.env.ATTESTATION_RATE_LIMIT_PER_MIN, 10, 1),

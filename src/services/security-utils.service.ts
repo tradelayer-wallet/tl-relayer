@@ -220,17 +220,24 @@ const parseCidr = (entry: string): CidrEntry | null => {
 export const isValidProxyCidr = (entry: string): boolean => parseCidr(entry) !== null;
 
 /**
- * True when an entry covers every IPv4 address: `0.0.0.0/0`, `::/0`, or any IPv6
- * block that contains the whole IPv4-mapped range `::ffff:0.0.0.0/96` (for example
- * `::ffff:0:0/96`). Trusting such an entry lets any client supply its own client IP
- * (round 6 / F-A3). Callers must reject it unless the operator opts in explicitly.
+ * True when a TRUST_PROXY_CIDRS entry is too broad to trust by default. Trusting such
+ * an entry lets a large share of clients, possibly all of them, supply their own
+ * client IP (round 6 / F-A3, round 7 / F-B1). Broad means any of:
+ * - it covers every IPv4 address (`0.0.0.0/0`, `::/0`, `::/64`, `::ffff:0:0/96`, ...);
+ * - an IPv4 entry (or an IPv4-mapped entry) with a prefix shorter than /8;
+ * - a non-mapped IPv6 entry with a prefix shorter than /16.
+ * Callers must reject these unless the operator opts in explicitly.
  */
 export const isBroadProxyCidr = (entry: string): boolean => {
     const network = parseCidr(entry);
     if (!network) return false;
-    const low = '::ffff:0.0.0.0';
-    const high = '::ffff:255.255.255.255';
-    return isIpInCidr(low, entry) && isIpInCidr(high, entry);
+    if (isIpInCidr('::ffff:0.0.0.0', entry) && isIpInCidr('::ffff:255.255.255.255', entry)) return true;
+    const slash = entry.indexOf('/');
+    const address = slash === -1 ? entry : entry.slice(0, slash);
+    // `bits` is the prefix over the 128-bit form: IPv4 entries carry +96 (see parseCidr).
+    const mapped = network.network.slice(0, 5).every((group) => group === 0) && network.network[5] === 0xffff;
+    if (isIP(address) === 4 || mapped) return network.bits - 96 < 8;
+    return network.bits < 16;
 };
 
 /**
@@ -267,7 +274,7 @@ export const isTrustedProxyPeer = (peerAddress: string, trustedProxies: string[]
  * such as cf-connecting-ip or x-real-ip are deliberately not read: a proxy that
  * does not overwrite them would let any client choose its own identity. A
  * malformed hop fails closed to the peer address. Returns '' when no usable
- * address exists.
+ * address exists. When every hop is a trusted proxy, the TCP peer is returned.
  */
 export const resolveClientIp = (
     peerAddress: string | undefined,
@@ -285,7 +292,10 @@ export const resolveClientIp = (
     for (let i = chain.length - 1; i >= 0; i -= 1) {
         if (!isTrustedProxyPeer(chain[i], trustedProxies)) return chain[i];
     }
-    return chain[0];
+    // Every hop is a trusted proxy, so no hop is provably the client. The leftmost hop
+    // is whatever the first proxy was sent, which the client controls (round 7 / F-B2).
+    // Fail closed to the TCP peer.
+    return peer;
 };
 
 /**
