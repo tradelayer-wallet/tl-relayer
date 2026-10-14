@@ -60,7 +60,9 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
         }
     });
 
-    fastify.get('/faucet/:address', async (request: FastifyRequest<{ Params: { address: string } }>, reply) => {
+    // Round 6 / F-A2: Fastify auto-registers HEAD for GET routes, and that HEAD route
+    // would run this funding handler. The faucet is GET-only; HEAD gets no route.
+    fastify.get('/faucet/:address', { exposeHeadRoute: false }, async (request: FastifyRequest<{ Params: { address: string } }>, reply) => {
         try {
             // Issue #1 / C1: the faucet moves real funds out of the node wallet.
             // Fail closed: disabled unless FAUCET_ENABLED=true explicitly opts in.

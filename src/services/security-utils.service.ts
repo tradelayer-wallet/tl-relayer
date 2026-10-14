@@ -172,12 +172,19 @@ const ipToGroups = (ip: string): number[] | null => {
 
 type CidrEntry = { network: number[]; bits: number };
 
-/** Canonical text form of an IP literal; IPv4-mapped IPv6 is shown as IPv4. */
+/**
+ * Canonical text form of an IP literal. IPv4-mapped IPv6 is always shown as dotted
+ * IPv4, whatever spelling arrived (`::ffff:1.2.3.4`, `::FFFF:102:304`, ...), so one
+ * client has one identity for logging, quotas and provider lookups (round 6 / F-A4).
+ */
 const canonicalIp = (ip: string): string | null => {
     const host = normalizeHostname(ip);
     if (!isIP(host)) return null;
-    const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(host);
-    return mapped ? mapped[1] : host;
+    const groups = expandIpv6Groups(host);
+    if (groups && groups.slice(0, 5).every((group) => group === 0) && groups[5] === 0xffff) {
+        return [groups[6] >> 8, groups[6] & 0xff, groups[7] >> 8, groups[7] & 0xff].join('.');
+    }
+    return host;
 };
 
 /**
@@ -211,6 +218,20 @@ const parseCidr = (entry: string): CidrEntry | null => {
 
 /** True when a TRUST_PROXY_CIDRS entry is a well-formed IP or CIDR. */
 export const isValidProxyCidr = (entry: string): boolean => parseCidr(entry) !== null;
+
+/**
+ * True when an entry covers every IPv4 address: `0.0.0.0/0`, `::/0`, or any IPv6
+ * block that contains the whole IPv4-mapped range `::ffff:0.0.0.0/96` (for example
+ * `::ffff:0:0/96`). Trusting such an entry lets any client supply its own client IP
+ * (round 6 / F-A3). Callers must reject it unless the operator opts in explicitly.
+ */
+export const isBroadProxyCidr = (entry: string): boolean => {
+    const network = parseCidr(entry);
+    if (!network) return false;
+    const low = '::ffff:0.0.0.0';
+    const high = '::ffff:255.255.255.255';
+    return isIpInCidr(low, entry) && isIpInCidr(high, entry);
+};
 
 /**
  * Membership test for an IP literal against an `ip` or `ip/prefix` entry. An

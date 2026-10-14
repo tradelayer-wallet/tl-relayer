@@ -138,6 +138,10 @@ export class WsRelayService {
 
   private handleConnection(ws: WebSocket, wsPathname: string) {
     const boundPath = normalizePath(wsPathname.replace(/^\/ws/, ""));
+    // Round 6 / F-A1: ws emits 'error' on protocol violations (for example an unmasked
+    // client frame). With no listener that event throws and takes the whole relayer
+    // down, so a single bad frame must only close its own connection.
+    ws.on("error", () => ws.terminate());
     jsonReply(ws, { event: "connected", boundPath });
 
     ws.on("message", async (raw) => {
@@ -148,6 +152,14 @@ export class WsRelayService {
         payload = JSON.parse(text);
       } catch {
         jsonReply(ws, { ok: false, error: "Invalid JSON payload" });
+        return;
+      }
+
+      // Round 6 / F-A1: `null`, numbers and arrays are valid JSON but not requests.
+      // Reading `.id` off `null` used to throw outside the try block below and crash
+      // the process through an unhandled promise rejection.
+      if (payload === null || typeof payload !== "object" || Array.isArray(payload)) {
+        jsonReply(ws, { ok: false, statusCode: 400, error: "Invalid request payload" });
         return;
       }
 
