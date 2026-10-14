@@ -2,7 +2,7 @@ import { FastifyInstance, FastifyRequest } from "fastify";
 import { fundAddress, getAddressBalance, importWatchOnlyAccounts, validateAddress } from "../services/address.service";
 import { listunspent, rescanWatchOnlyAccounts, verifyWatchOnlyAccountCoverage } from "../services/sochain.service"; // Import the new function
 import { envConfig } from "../config/env.config";
-import { secureCompare, validateBootstrapSourceUrl } from "../services/security-utils.service";
+import { headerCredentialMatches, scrubSensitiveQuery, validateBootstrapSourceUrl } from "../services/security-utils.service";
 import {
     bootstrapWatchOnlyRegistryFromSeed,
     getWatchOnlyCoverage,
@@ -18,7 +18,8 @@ function getRequestTrace(request: FastifyRequest<any>, route: string): Record<st
         route,
         traceId: String((headers['x-request-id'] as string) || (headers['x-correlation-id'] as string) || '').trim() || null,
         origin: String((headers.origin as string) || '').trim() || null,
-        referer: String((headers.referer as string) || '').trim() || null,
+        // A referer is the caller's page URL and may carry ?apiKey=; redact it like the request URL.
+        referer: scrubSensitiveQuery(String((headers.referer as string) || '').trim(), 'redact') || null,
         userAgent: String((headers['user-agent'] as string) || '').trim() || null,
         contentType: String((headers['content-type'] as string) || '').trim() || null,
     };
@@ -67,13 +68,10 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
                 reply.status(403).send({ error: 'Faucet is disabled. Set FAUCET_ENABLED=true to enable it.' });
                 return;
             }
-            // Fail closed: an admin key must always be configured and matched.
-            // (Startup also refuses to run with FAUCET_ENABLED and no ADMIN_API_KEY.)
-            const adminKey = envConfig.ADMIN_API_KEY;
-            const providedKey = String(
-                request.headers['x-admin-api-key'] || request.headers['x-api-key'] || ''
-            );
-            if (!adminKey || !secureCompare(providedKey, adminKey)) {
+            // Fail closed: ADMIN_API_KEY must match in x-admin-api-key or x-api-key,
+            // the same rule the API-key hook applies. (Startup also refuses to run
+            // with FAUCET_ENABLED and no ADMIN_API_KEY.)
+            if (!headerCredentialMatches(request.headers, ['x-admin-api-key', 'x-api-key'], envConfig.ADMIN_API_KEY)) {
                 reply.status(403).send({ error: 'Forbidden' });
                 return;
             }

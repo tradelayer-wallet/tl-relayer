@@ -126,12 +126,18 @@ const isBlockedIpv6Groups = (groups: number[]): boolean => {
     if (first === 0x2002) {
         return isBlockedIpv4(embeddedIpv4(groups[1], groups[2]));
     }
+    // Teredo 2001:0000::/32 embeds the client's IPv4 address obfuscated (bitwise
+    // NOT) in groups 6-7; the server address in groups 2-3 is public and ignored.
+    if (first === 0x2001 && groups[1] === 0x0000) {
+        return isBlockedIpv4(embeddedIpv4(groups[6] ^ 0xffff, groups[7] ^ 0xffff));
+    }
     return false;
 };
 
 /**
- * Returns true when a URL hostname is a private, loopback, link-local, unspecified,
- * or cloud-metadata address and must not be fetched by the server (SSRF guard).
+ * Returns true when a URL hostname is a literal private, loopback, link-local,
+ * unspecified, or cloud-metadata address (SSRF guard). DNS names are not resolved
+ * here, so a public-looking name that resolves to a private address is not caught.
  */
 export const isBlockedBootstrapHost = (hostname: string): boolean => {
     const host = normalizeHostname(hostname);
@@ -195,6 +201,11 @@ const parseCidr = (entry: string): CidrEntry | null => {
     }
     const network = ipToGroups(netPart);
     if (!network) return null;
+    // `::ffff:a.b.c.d/p` is an IPv4-mapped literal whose prefix is ambiguous: read as an
+    // IPv6 prefix it would match whole IPv6 ranges and every IPv4 peer (round 3 / F10).
+    // Only the IPv4 spelling (`a.b.c.d/p`) or a prefix of 96 or more is accepted.
+    const isMapped = version === 6 && network.slice(0, 5).every((group) => group === 0) && network[5] === 0xffff;
+    if (isMapped && prefix < 96) return null;
     return { network, bits: version === 4 ? prefix + 96 : prefix };
 };
 
@@ -224,16 +235,18 @@ export const isTrustedProxyPeer = (peerAddress: string, trustedProxies: string[]
     trustedProxies.some((entry) => isIpInCidr(peerAddress, entry));
 
 /**
- * The single trusted-client-IP resolver (issue #1 round 2 / NEW-2). Anything
- * that depends on the caller's IP must go through this function.
+ * The single trusted-client-IP resolver (issue #1 round 2 / NEW-2, round 3 / F1).
+ * Anything that depends on the caller's IP must go through this function.
  *
- * Forwarding headers are believed only when the direct TCP peer is inside
+ * Only X-Forwarded-For is believed, and only when the direct TCP peer is inside
  * `trustedProxies`; otherwise the peer address is returned and headers are
- * ignored. For a trusted peer, `cf-connecting-ip` and then `x-real-ip` are used
- * when present. Otherwise X-Forwarded-For is walked right to left, skipping
- * trusted proxy hops, and the first untrusted hop is the client. A malformed or
- * repeated forwarding header fails closed to the peer address. Returns '' when
- * no usable address exists.
+ * ignored. The chain is walked right to left, skipping trusted proxy hops, and
+ * the first untrusted hop is the client. Each proxy appends the address it
+ * received from, so client-supplied prefixes never win. Single-value headers
+ * such as cf-connecting-ip or x-real-ip are deliberately not read: a proxy that
+ * does not overwrite them would let any client choose its own identity. A
+ * malformed hop fails closed to the peer address. Returns '' when no usable
+ * address exists.
  */
 export const resolveClientIp = (
     peerAddress: string | undefined,
@@ -243,15 +256,8 @@ export const resolveClientIp = (
     const peer = canonicalIp(String(peerAddress || '')) || '';
     if (!peer || !isTrustedProxyPeer(peer, trustedProxies)) return peer;
 
-    for (const name of ['cf-connecting-ip', 'x-real-ip']) {
-        const value = headers[name];
-        if (value === undefined || String(value).trim() === '') continue;
-        return typeof value === 'string' ? canonicalIp(value) || peer : peer;
-    }
-
     const xff = headers['x-forwarded-for'];
-    if (xff === undefined || String(xff).trim() === '') return peer;
-    if (typeof xff !== 'string') return peer;
+    if (xff === undefined || typeof xff !== 'string' || xff.trim() === '') return peer;
     const hops = xff.split(',').map((hop) => canonicalIp(hop));
     if (hops.some((hop) => hop === null)) return peer;
     const chain = hops as string[];
@@ -262,32 +268,78 @@ export const resolveClientIp = (
 };
 
 /**
- * Credential-bearing query parameter names (issue #1 round 2 / NEW-3). `?apiKey=`
- * is accepted on the WS handshake for browser compatibility, so these values must
- * be redacted before any URL is logged and removed before a URL is dispatched
- * internally.
+ * Bucket key for per-client quotas. IPv6 is keyed on its /64 prefix because a
+ * single subscriber typically owns a whole /64 and could otherwise mint an
+ * unlimited number of distinct per-address buckets (round 3 / F6).
  */
-const SENSITIVE_QUERY_PARAM_KEYS = new Set(['apikey', 'api_key', 'api-key', 'token', 'access_token']);
+export const rateLimitKey = (ip: string): string => {
+    const canonical = canonicalIp(ip);
+    if (!canonical) return '';
+    if (isIP(canonical) === 4) return canonical;
+    const groups = expandIpv6Groups(canonical);
+    if (!groups) return canonical;
+    return `${groups.slice(0, 4).map((group) => group.toString(16)).join(':')}::/64`;
+};
+
+/**
+ * True when any of the named request headers carries the expected secret. This is
+ * the one comparison used for every API-key gate, so the hook and the handler
+ * cannot disagree about which presented header counts.
+ */
+export const headerCredentialMatches = (
+    headers: Record<string, unknown>,
+    headerNames: string[],
+    expected: string,
+): boolean => {
+    if (!expected) return false;
+    return headerNames.some((name) => {
+        const presented = String(headers[name] || '');
+        return !!presented && secureCompare(presented, expected);
+    });
+};
+
+/**
+ * Credential-bearing query parameter names (issue #1 round 2 / NEW-3, round 3 / F3).
+ * Matching ignores case, `-` and `_`, so `apiKey`, `API_KEY`, `x-api-key`,
+ * `admin_api_key` and `access_token` are all covered. `?apiKey=` is accepted on the
+ * WS handshake for browser compatibility, so these values must be redacted before
+ * any URL is logged and removed before a URL is dispatched internally.
+ */
+const isSensitiveQueryKey = (key: string): boolean => {
+    const name = key.trim().toLowerCase().replace(/[-_]/g, '');
+    return name.endsWith('apikey') || name === 'token' || name === 'accesstoken' || name === 'secret' || name === 'password';
+};
 
 /**
  * Returns the URL with credential-bearing query values replaced by `REDACTED`
  * (mode `redact`, for log lines) or deleted (mode `remove`, for internal dispatch).
+ * The fragment (`#...`) is dropped in both modes: HTTP clients never send it, and
+ * a value written after `#` must not survive as query text (round 3 / F2).
  */
 export const scrubSensitiveQuery = (rawUrl: string, mode: 'redact' | 'remove'): string => {
-    const value = String(rawUrl || '');
+    const raw = String(rawUrl || '');
+    const hashIndex = raw.indexOf('#');
+    const value = hashIndex === -1 ? raw : raw.slice(0, hashIndex);
     const qIndex = value.indexOf('?');
     if (qIndex === -1) return value;
-    const params = new URLSearchParams(value.slice(qIndex + 1));
-    const sensitive: string[] = [];
-    params.forEach((_value, key) => {
-        if (SENSITIVE_QUERY_PARAM_KEYS.has(key.trim().toLowerCase())) sensitive.push(key);
-    });
-    for (const key of sensitive) {
-        if (mode === 'redact') params.set(key, 'REDACTED');
-        else params.delete(key);
+    // `?` separates parameters as well as `&`. Splitting on `&` alone let a second
+    // `?` hide a credential inside the value of the preceding parameter (round 3 / F9).
+    const kept: string[] = [];
+    for (const segment of value.slice(qIndex + 1).split(/[&?]/)) {
+        if (segment === '') continue;
+        const eq = segment.indexOf('=');
+        const rawKey = eq === -1 ? segment : segment.slice(0, eq);
+        let key = '';
+        new URLSearchParams(rawKey).forEach((_v, decoded) => {
+            if (!key) key = decoded;
+        });
+        if (!isSensitiveQueryKey(key)) {
+            kept.push(segment);
+        } else if (mode === 'redact') {
+            kept.push(`${rawKey}=REDACTED`);
+        }
     }
-    const qs = params.toString();
-    return qs ? `${value.slice(0, qIndex)}?${qs}` : value.slice(0, qIndex);
+    return kept.length > 0 ? `${value.slice(0, qIndex)}?${kept.join('&')}` : value.slice(0, qIndex);
 };
 
 export type BootstrapUrlValidation = {

@@ -3,7 +3,7 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { isIP } from 'net';
 import { envConfig } from '../config/env.config';
 import { AttestationService } from '../services/attestation.service';
-import { isTrustedProxyPeer, resolveClientIp } from '../services/security-utils.service';
+import { isTrustedProxyPeer, rateLimitKey, resolveClientIp } from '../services/security-utils.service';
 
 const attestationService = new AttestationService();
 
@@ -19,7 +19,7 @@ const trustedProxies = (): string[] => (envConfig.TRUST_PROXY ? envConfig.TRUST_
 
 // Issue #1 round 2 / NEW-5: the public /attestation/* routes fan out to several
 // outbound reputation providers per request. Bound both the per-client request
-// rate (fixed window, keyed on the resolved client IP) and the global number of
+// rate (fixed window, keyed on the resolved client IP; IPv6 per /64) and the global number of
 // lookups in flight.
 const RATE_WINDOW_MS = 60 * 1000;
 const MAX_TRACKED_CLIENTS = 4096;
@@ -69,10 +69,9 @@ export async function registerAttestationRoutes(server: FastifyInstance) {
       const result = await attestationService.checkIp(normalizedIp);
       return result;
     } catch (err: any) {
-      console.error(
-        { err },
-        '[attestation] Failed to check IP reputation',
-      );
+      // Message only: the error object carries axios's request config (provider
+      // URLs with the IPinfo token, and the CriminalIP key header).
+      console.error('[attestation] Failed to check IP reputation:', err?.message || 'unknown error');
       reply.code(500);
       return {
         success: false,
@@ -92,7 +91,7 @@ export async function registerAttestationRoutes(server: FastifyInstance) {
     const peer = String((req.socket && req.socket.remoteAddress) || '');
     const trusted = trustedProxies();
     const clientIp = resolveClientIp(peer, req.headers, trusted);
-    if (!consumeRateToken(clientIp || 'unknown')) {
+    if (!consumeRateToken(rateLimitKey(clientIp) || 'unknown')) {
       reply.code(429).header('retry-after', '60');
       return {
         success: false,

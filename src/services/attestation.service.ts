@@ -70,9 +70,12 @@ export class AttestationService {
     process.env.IPINFO_TOKEN || process.env.VPN_IPINFO || '';
 
   private readonly bannedCountries = ['US', 'KP', 'SD', 'RU', 'IR'];
-  private readonly cacheTtlMs = Number(process.env.ATTESTATION_CACHE_TTL_MS || 60 * 60 * 1000);
-  private readonly failureCacheTtlMs = Number(process.env.ATTESTATION_FAILURE_CACHE_TTL_MS || 60 * 1000);
+  private readonly cacheTtlMs = envConfig.ATTESTATION_CACHE_TTL_MS;
+  private readonly failureCacheTtlMs = envConfig.ATTESTATION_FAILURE_CACHE_TTL_MS;
+  // Round 3 / F5: the cache is bounded. Entries are otherwise removed only when
+  // the same IP is looked up again, so distinct client IPs would grow it forever.
   private readonly cache = new Map<string, CachedIpAttestation>();
+  private static readonly MAX_CACHE_ENTRIES = 10_000;
 
   async checkIp(ipAddress: string): Promise<IpAttestationResult> {
     const normalizedIp = this.normalizeIp(ipAddress);
@@ -276,6 +279,12 @@ export class AttestationService {
   private setCached(ipAddress: string, result: IpAttestationResult): void {
     const ttl = result.success ? this.cacheTtlMs : this.failureCacheTtlMs;
     if (ttl <= 0) return;
+    this.cache.delete(ipAddress);
+    // Full: drop the oldest-inserted entry. Expired entries age out this way too.
+    if (this.cache.size >= AttestationService.MAX_CACHE_ENTRIES) {
+      const oldest = this.cache.keys().next();
+      if (!oldest.done) this.cache.delete(oldest.value);
+    }
     this.cache.set(ipAddress, {
       expiresAt: Date.now() + ttl,
       result,

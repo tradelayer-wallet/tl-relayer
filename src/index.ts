@@ -3,10 +3,10 @@ import { handleRoutes } from './routes/routes';
 import { handleRpcConnection } from './config/rpc.config';
 import { envConfig } from './config/env.config';
 import {
+    headerCredentialMatches,
     isInternalRelayRequest,
     isValidProxyCidr,
     scrubSensitiveQuery,
-    secureCompare,
 } from './services/security-utils.service';
 import { WsRelayService } from './services/ws-relay.service';
 import { startWatchOnlyRegistryReconciliation } from './services/watchonly-registry.service';
@@ -135,19 +135,14 @@ class FastifyServer {
             // handshake, and the relay presents the per-process internal marker
             // on its app.inject path (see security-utils.service.ts).
             if (isInternalRelayRequest(request.headers)) return;
-            // Issue #1 round 2 / NEW-6: on the faucet either configured key may be
-            // presented in either credential header, so an operator holding only
-            // ADMIN_API_KEY does not also need RELAYER_API_KEY. The faucet handler
-            // still requires ADMIN_API_KEY itself before moving funds.
+            // Issue #1 round 2 / NEW-6, round 3 / F8: the faucet is gated by
+            // ADMIN_API_KEY alone, presented in either credential header. The
+            // faucet handler applies the same check (it is the only gate on the
+            // WS path and when RELAYER_API_KEY is unset).
             const isFaucet = route !== null && isFaucetRoute(route);
-            const acceptedKeys = isFaucet ? [apiKey, envConfig.ADMIN_API_KEY] : [apiKey];
-            const presentedKeys = isFaucet
-                ? [request.headers['x-api-key'], request.headers['x-admin-api-key']]
-                : [request.headers['x-api-key']];
-            const authorized = presentedKeys.some((header) => {
-                const presented = String(header || '');
-                return acceptedKeys.some((expected) => !!expected && !!presented && secureCompare(presented, expected));
-            });
+            const authorized = isFaucet
+                ? headerCredentialMatches(request.headers, ['x-api-key', 'x-admin-api-key'], envConfig.ADMIN_API_KEY)
+                : headerCredentialMatches(request.headers, ['x-api-key'], apiKey);
             if (authorized) return;
             reply.code(401).send({ error: 'Missing or invalid x-api-key header' });
             return reply;
@@ -182,7 +177,7 @@ class FastifyServer {
 
 const port = envConfig.SERVER_PORT;
 // Issue #1 round 2 / NEW-3: `?apiKey=` stays accepted on the WS handshake for
-// browser compatibility, so request log lines must not carry its value.
+// browser compatibility, so request log lines must not carry credential values.
 const options: FastifyServerOptions = {
     logger: {
         serializers: {

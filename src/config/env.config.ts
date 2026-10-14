@@ -33,12 +33,21 @@ const parseCsv = (value: string | undefined) =>
 
 // Strict integer setting for the security knobs: a malformed or out-of-range
 // value stops startup with a clear message instead of silently taking a default.
-const parseStrictInt = (name: string, value: string | undefined, fallback: number, min: number): number => {
+// `max` matters for values handed to setTimeout, which fires after 1 ms when the
+// delay exceeds 2^31-1 ms (round 3 / F7).
+const parseStrictInt = (
+    name: string,
+    value: string | undefined,
+    fallback: number,
+    min: number,
+    max?: number,
+): number => {
     const raw = String(value ?? '').trim();
     if (raw === '') return fallback;
     const parsed = Number(raw);
-    if (!/^\d+$/.test(raw) || parsed < min) {
-        throw new Error(`[config] ${name} must be an integer >= ${min}, got "${raw}"`);
+    const range = max === undefined ? `>= ${min}` : `between ${min} and ${max}`;
+    if (!/^\d+$/.test(raw) || parsed < min || (max !== undefined && parsed > max)) {
+        throw new Error(`[config] ${name} must be an integer ${range}, got "${raw}"`);
     }
     return parsed;
 };
@@ -78,6 +87,8 @@ export const envConfig: {
     ATTESTATION_RATE_LIMIT_PER_MIN: number;
     ATTESTATION_MAX_IN_FLIGHT: number;
     ATTESTATION_PROVIDER_TIMEOUT_MS: number;
+    ATTESTATION_CACHE_TTL_MS: number;
+    ATTESTATION_FAILURE_CACHE_TTL_MS: number;
     BLOCKCYPHER_TOKEN: string;
     VPN_KEYS: {
         VPN_CRIMINALIP: string;
@@ -120,7 +131,9 @@ export const envConfig: {
     ATTESTATION_ALLOW_IP_OVERRIDE: parseBool(process.env.ATTESTATION_ALLOW_IP_OVERRIDE),
     ATTESTATION_RATE_LIMIT_PER_MIN: parseStrictInt('ATTESTATION_RATE_LIMIT_PER_MIN', process.env.ATTESTATION_RATE_LIMIT_PER_MIN, 10, 1),
     ATTESTATION_MAX_IN_FLIGHT: parseStrictInt('ATTESTATION_MAX_IN_FLIGHT', process.env.ATTESTATION_MAX_IN_FLIGHT, 5, 1),
-    ATTESTATION_PROVIDER_TIMEOUT_MS: parseStrictInt('ATTESTATION_PROVIDER_TIMEOUT_MS', process.env.ATTESTATION_PROVIDER_TIMEOUT_MS, 5000, 250),
+    ATTESTATION_PROVIDER_TIMEOUT_MS: parseStrictInt('ATTESTATION_PROVIDER_TIMEOUT_MS', process.env.ATTESTATION_PROVIDER_TIMEOUT_MS, 5000, 250, 60000),
+    ATTESTATION_CACHE_TTL_MS: parseStrictInt('ATTESTATION_CACHE_TTL_MS', process.env.ATTESTATION_CACHE_TTL_MS, 60 * 60 * 1000, 0),
+    ATTESTATION_FAILURE_CACHE_TTL_MS: parseStrictInt('ATTESTATION_FAILURE_CACHE_TTL_MS', process.env.ATTESTATION_FAILURE_CACHE_TTL_MS, 60 * 1000, 0),
     BLOCKCYPHER_TOKEN: String(process.env.BLOCKCYPHER_TOKEN || '').trim(),
     VPN_KEYS: {
         VPN_CRIMINALIP: process.env.VPN_CRIMINALIP,

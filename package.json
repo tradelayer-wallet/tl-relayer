@@ -8,6 +8,7 @@
     "build:watch": "webpack -w --mode=development",
     "verify:routed-watchonly": "node scripts/verify-routed-watchonly-flow.cjs",
     "verify:round2-hardening": "node scripts/verify-round2-hardening.cjs",
+    "verify:round3-hardening": "node scripts/verify-round3-hardening.cjs",
     "start": "node ./dist/index.js",
     "start:watch": "nodemon ./dist/index.js"
   },
