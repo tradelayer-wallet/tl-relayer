@@ -1,6 +1,7 @@
 import axios from 'axios';
 
 import { envConfig } from '../config/env.config';
+import { isOutboundSafeAddress, OUTBOUND_LIMITS } from './security-utils.service';
 
 export interface ExternalWatchOnlyUtxo {
     txid: string;
@@ -67,16 +68,25 @@ export async function fetchExternalWatchOnlySnapshot(address: string, network?: 
     if (!mappedNetwork || source !== 'sochain') {
         return null;
     }
+    // Round 8: the address is placed in the URL path, and the API key header is sent with
+    // every page. The address comes from a public route parameter, so a value with `/`,
+    // `..`, `?` or `#` must never reach the request. Fail closed before any outbound call.
+    const safeAddress = normalize(address);
+    if (!isOutboundSafeAddress(safeAddress)) {
+        return null;
+    }
 
     const apiKey = normalize(envConfig.WATCHONLY_EXTERNAL_API_KEY || '');
     const headers = apiKey ? { 'API-KEY': apiKey } : undefined;
     const allUtxos: ExternalWatchOnlyUtxo[] = [];
     let page = 1;
     while (page <= 20) {
-        const url = `https://chain.so/api/v3/unspent_outputs/${mappedNetwork}/${address}/${page}`;
+        const url = `https://chain.so/api/v3/unspent_outputs/${mappedNetwork}/${encodeURIComponent(safeAddress)}/${page}`;
         const res = await axios.get(url, {
             timeout: 15000,
             headers,
+            maxRedirects: 0,
+            maxContentLength: OUTBOUND_LIMITS.utxoPageMaxResponseBytes,
         });
         const payload: any = res.data || {};
         if (String(payload?.status || '').toLowerCase() !== 'success') {
@@ -95,7 +105,7 @@ export async function fetchExternalWatchOnlySnapshot(address: string, network?: 
     return {
         source: 'sochain',
         network: mappedNetwork,
-        address: normalize(address),
+        address: safeAddress,
         checkedAt,
         hash: computeHash(allUtxos),
         count: allUtxos.length,

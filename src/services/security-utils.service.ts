@@ -31,14 +31,21 @@ export const isInternalRelayRequest = (headers: Record<string, unknown>): boolea
     return !!provided && secureCompare(provided, INTERNAL_RELAY_AUTH_TOKEN);
 };
 
-const normalizeHostname = (hostname: string): string =>
-    String(hostname || '')
-        .trim()
-        .replace(/^\[/, '')
-        .replace(/\]$/, '')
-        .split('%')[0]          // strip IPv6 zone id
-        .toLowerCase()
-        .replace(/\.+$/, '');   // strip trailing dots (`localhost.` -> `localhost`)
+// Longest text that can be an IP literal with a zone id. Anything longer is not an address,
+// and it is rejected before any pattern runs over it (round 8: X-Forwarded-For hops reach this
+// function from clients, so their length must be bounded here).
+const MAX_HOST_LITERAL_LENGTH = 128;
+
+const normalizeHostname = (hostname: string): string => {
+    let host = String(hostname || '').trim();
+    if (host.length > MAX_HOST_LITERAL_LENGTH) return '';
+    host = host.replace(/^\[/, '').replace(/\]$/, '').split('%')[0].toLowerCase();
+    // Strip trailing dots (`localhost.` -> `localhost`) with a linear scan. A pattern such as
+    // /\.+$/ backtracks quadratically on a long dot run: about 5 s per 100 kB of input.
+    let end = host.length;
+    while (end > 0 && host.charCodeAt(end - 1) === 46) end -= 1;
+    return host.slice(0, end);
+};
 
 const parseIpv4Octets = (host: string): number[] | null => {
     if (isIP(host) !== 4) return null;
@@ -417,3 +424,26 @@ export const validateBootstrapSourceUrl = (
 
     return { ok: true, sourceUrl: value };
 };
+
+/**
+ * Response-size caps for outbound calls (round 8). A provider, an external UTXO source
+ * or an operator seed host that returns an unbounded body (for example 2 GB) would
+ * otherwise be buffered whole by axios, which has no default cap. The redirect policy
+ * for these calls is `maxRedirects: 0`: a 3xx answer is an error, never a second request
+ * that could carry a credential to another host.
+ */
+export const OUTBOUND_LIMITS = {
+    /** Reputation providers (ipinfo, criminalip, ip-api). Real answers are a few KB. */
+    providerMaxResponseBytes: 1024 * 1024,
+    /** One page of the external UTXO source (chain.so). */
+    utxoPageMaxResponseBytes: 4 * 1024 * 1024,
+    /** Operator-configured bootstrap seed snapshot (the whole watch-only registry). */
+    bootstrapMaxResponseBytes: 32 * 1024 * 1024,
+} as const;
+
+/**
+ * Address shape accepted before an address is placed in an outbound URL path. Legacy
+ * base58 and bech32 addresses (mainnet and testnet) are alphanumeric. Anything else,
+ * including `/`, `.`, `?`, `#` and `%`, could change the path or query of the request.
+ */
+export const isOutboundSafeAddress = (value: string): boolean => /^[A-Za-z0-9]{20,100}$/.test(String(value || ''));

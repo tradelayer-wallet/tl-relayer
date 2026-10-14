@@ -1,4 +1,5 @@
 import Fastify, { FastifyInstance, FastifyReply, FastifyRequest, FastifyServerOptions } from 'fastify';
+import type { Server as HttpServer } from 'http';
 import { handleRoutes } from './routes/routes';
 import { handleRpcConnection } from './config/rpc.config';
 import { envConfig } from './config/env.config';
@@ -11,6 +12,7 @@ import {
 } from './services/security-utils.service';
 import { WsRelayService } from './services/ws-relay.service';
 import { startWatchOnlyRegistryReconciliation } from './services/watchonly-registry.service';
+import { attachRequestDeadlines } from './services/http-deadlines.service';
 
 // Issue #1 / C1: optional API-key gate (x-api-key) for non-safe routes when
 // RELAYER_API_KEY is set. The policy is inverted: every route that is not
@@ -71,6 +73,8 @@ class FastifyServer {
         await this.handleRpcConnection();
         this.handleSockets();
         this.handleWatchOnlyRegistry();
+        // Round 8: per-connection header and body deadlines (slowloris). See http-deadlines.service.ts.
+        attachRequestDeadlines(this.server.server as unknown as HttpServer);
         if(!this.port){this.port=8000}
         this.server.listen(this.port, '0.0.0.0')
             .then(() => console.log(`Server Started On Port ${this.port}`))

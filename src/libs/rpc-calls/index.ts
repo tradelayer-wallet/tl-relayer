@@ -28,6 +28,9 @@ export class RpcClient {
             params: args,
         };
         const requestJSON = JSON.stringify(requestObj);
+        // Round 8: Content-Length is the byte length. String.length counts UTF-16 units, so any
+        // non-ASCII parameter made the declared length short and the node read a truncated body.
+        const requestBody = Buffer.from(requestJSON, 'utf8');
         const { host, port, username, password, timeout } = this.options;
         const requestOptions = {
             host: host,
@@ -35,7 +38,7 @@ export class RpcClient {
             method: 'POST',
             headers: {
               'Host': 'localhost',
-              'Content-Length': requestJSON.length,
+              'Content-Length': requestBody.length,
             },
             agent: false,
             auth:  username + ':' + password,
@@ -79,7 +82,7 @@ export class RpcClient {
                 });
               });
 
-            request.end(requestJSON);
+            request.end(requestBody);
         });    
     }
 }

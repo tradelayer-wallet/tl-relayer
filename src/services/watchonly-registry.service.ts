@@ -4,7 +4,7 @@ import * as path from 'node:path';
 import { randomBytes } from 'node:crypto';
 
 import { envConfig } from '../config/env.config';
-import { validateBootstrapSourceUrl } from './security-utils.service';
+import { OUTBOUND_LIMITS, validateBootstrapSourceUrl } from './security-utils.service';
 import { ELogType, saveLog } from './utils.service';
 
 export interface WatchOnlyAccount {
@@ -615,7 +615,12 @@ export async function bootstrapWatchOnlyRegistryFromSeed(input?: {
 
     // Issue #1 / C2: never follow redirects on the bootstrap fetch — a public
     // https host could otherwise redirect us to an internal/metadata address.
-    const response = await axios.get(url, { timeout: 15_000, maxRedirects: 0 });
+    // Round 8: the seed snapshot body is capped as well (a seed host could return gigabytes).
+    const response = await axios.get(url, {
+        timeout: 15_000,
+        maxRedirects: 0,
+        maxContentLength: OUTBOUND_LIMITS.bootstrapMaxResponseBytes,
+    });
     const payload: any = response.data || {};
     const entries = Array.isArray(payload?.entries)
         ? payload.entries
