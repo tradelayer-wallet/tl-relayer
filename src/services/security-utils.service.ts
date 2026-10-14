@@ -31,10 +31,11 @@ export const isInternalRelayRequest = (headers: Record<string, unknown>): boolea
     return !!provided && secureCompare(provided, INTERNAL_RELAY_AUTH_TOKEN);
 };
 
-// Longest text that can be an IP literal with a zone id. Anything longer is not an address,
-// and it is rejected before any pattern runs over it (round 8: X-Forwarded-For hops reach this
-// function from clients, so their length must be bounded here).
-const MAX_HOST_LITERAL_LENGTH = 128;
+// Longest text this function will classify. A DNS name is at most 253 characters and an IP
+// literal with a zone id is far shorter, so anything longer is refused before any pattern runs
+// over it (round 8: X-Forwarded-For hops reach this function from clients). Round 10: the cap was
+// 128, which refused valid DNS names of 129 to 253 characters as bootstrap sources.
+const MAX_HOST_LITERAL_LENGTH = 256;
 
 const normalizeHostname = (hostname: string): string => {
     let host = String(hostname || '').trim();
