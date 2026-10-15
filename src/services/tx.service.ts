@@ -1,5 +1,5 @@
 import * as bitcoin from 'bitcoinjs-lib';
-import axios from 'axios';
+import { OUTBOUND_TIMEOUT_MS, outboundCall } from './outbound.service';
 import { rpcClient } from "../config/rpc.config";  // Your configured RPC client
 import { getWatchOnlyRegistryEntry } from './watchonly-registry.service';
 import { callAllocatedRpc, callRpc } from './address.service';
@@ -238,7 +238,7 @@ export const smartRpc: TClient = async (
     if (relayerApiUrl) {
       const url = `${relayerApiUrl}/rpc/${method}`;
       try {
-        const res = await axios.post(url, { params });
+        const res = await outboundCall({ method: 'POST', url, data: { params }, timeoutMs: OUTBOUND_TIMEOUT_MS });
         return res.data;
       } catch (error: any) {
         if (normalizedMethod === 'listunspent') {

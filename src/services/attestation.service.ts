@@ -1,29 +1,19 @@
 // src/services/attestation.service.ts
-import axios, { AxiosResponse } from 'axios';
+import { AxiosResponse } from 'axios';
 import { isIP } from 'net';
 import { envConfig } from '../config/env.config';
 import { OUTBOUND_LIMITS } from './security-utils.service';
+import { outboundCall } from './outbound.service';
 
-// Issue #1 round 2 / NEW-5: the single outbound path for reputation providers.
-// axios's own `timeout` only bounds socket inactivity, so a stalled DNS lookup
-// or a slow-drip body can outlive it. The AbortController enforces a wall-clock
-// deadline over the whole request. Failures reject, as with plain axios.
-// Round 8: the body is capped (a provider could return gigabytes) and redirects
-// are refused, so the provider key header and the IPinfo token never follow a 3xx.
-const providerGet = async (url: string, headers?: Record<string, string>): Promise<AxiosResponse> => {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), envConfig.ATTESTATION_PROVIDER_TIMEOUT_MS);
-  try {
-    return await axios.get(url, {
-      headers,
-      signal: controller.signal,
-      maxRedirects: 0,
-      maxContentLength: OUTBOUND_LIMITS.providerMaxResponseBytes,
-    });
-  } finally {
-    clearTimeout(timer);
-  }
-};
+// Reputation providers: a wall-clock deadline, a body cap and no redirects, so the provider
+// key header and the IPinfo token never follow a 3xx. See outbound.service.ts.
+const providerGet = (url: string, headers?: Record<string, string>): Promise<AxiosResponse> =>
+  outboundCall({
+    url,
+    headers,
+    timeoutMs: envConfig.ATTESTATION_PROVIDER_TIMEOUT_MS,
+    maxBytes: OUTBOUND_LIMITS.providerMaxResponseBytes,
+  });
 
 export interface IpAttestationResult {
   success: boolean;

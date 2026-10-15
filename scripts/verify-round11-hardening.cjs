@@ -32,6 +32,8 @@ const startCollatorStub = () =>
         if (collatorStub.mode === 'payload-error') {
           res.setHeader('content-type', 'application/json');
           res.end(JSON.stringify({ ok: false, error: { message: 'boom' } }));
+        } else if (collatorStub.mode === 'drip') {
+          dripResponse(res);
         } else if (collatorStub.mode === 'http-500') {
           res.statusCode = 500;
           res.setHeader('content-type', 'application/json');
@@ -49,6 +51,19 @@ const startCollatorStub = () =>
       resolve();
     });
   });
+
+// Sends headers and then one byte every 100 ms, never finishing: a slow drip that keeps a
+// socket-inactivity timer from ever firing.
+const dripResponse = (res) => {
+  res.writeHead(200, { 'content-type': 'application/json' });
+  const timer = setInterval(() => res.write(' '), 100);
+  res.on('close', () => clearInterval(timer));
+};
+
+const dripServer = http.createServer((req, res) => {
+  req.resume();
+  dripResponse(res);
+});
 
 const listen = (server) => new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve(server.address().port)));
 
@@ -202,11 +217,12 @@ const TXA = 'a'.repeat(64);
 const TXB = 'b'.repeat(64);
 const TXC = 'c'.repeat(64);
 
-// Replaces axios.get for the duration of one case and returns the restore function.
+// Replaces axios.request (the one call every outbound GET and POST goes through) for the
+// duration of one case; impl receives the URL and the config and returns the response.
 const stubAxiosGet = (impl) => {
-  const original = axios.get;
-  axios.get = impl;
-  return () => { axios.get = original; };
+  const original = axios.request;
+  axios.request = (config) => impl(config.url, config);
+  return () => { axios.request = original; };
 };
 
 const chainPage = (outputs) => ({ data: { status: 'success', data: { outputs } } });
@@ -217,6 +233,12 @@ const outputsFor = (page, count) =>
     value: '0.00000001',
     confirmations: 5,
   }));
+
+const withinMs = (ms, promise) =>
+  Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(`no result within ${ms} ms`)), ms)),
+  ]);
 
 const digestCases = () => {
   const verifySet = async (localUtxos, explorerOutputs) => {
@@ -317,10 +339,58 @@ const partialSnapshotCases = () => {
   ];
 };
 
+const deadlineCases = () => [
+  ['R11-DL BUG a collator call against a slow drip is settled by an outbound deadline', async () => {
+    collatorStub.mode = 'drip';
+    try {
+      const service = loadSource('src/services/address.service.ts');
+      const call = service.callAllocatedRpc('tl_getinfo', []).then(
+        (res) => (res.error ? 'error' : 'ok'),
+        () => 'error',
+      );
+      const outcome = await withinMs(25000, call).catch(() => 'hung');
+      assert(outcome === 'error', `outcome ${outcome}`);
+    } finally {
+      collatorStub.mode = 'ok';
+    }
+  }],
+  ['R11-DL BUG a relayer API call (smartRpc) against a slow drip is settled by an outbound deadline', async () => {
+    const tx = loadSource('src/services/tx.service.ts');
+    const call = tx.smartRpc('getblockcount', [], true).then(() => 'ok', () => 'error');
+    const outcome = await withinMs(25000, call).catch(() => 'hung');
+    assert(outcome === 'error', `outcome ${outcome}`);
+  }],
+];
+
+const rpcSocketCases = () => [
+  ['R11-RPC BUG a timed-out RPC request closes its socket', async () => {
+    let serverSideClosed = false;
+    const silent = net.createServer((sock) => {
+      // A socket that is never read never emits 'end', so the request body is drained here.
+      sock.resume();
+      sock.on('error', () => {});
+      sock.on('close', () => { serverSideClosed = true; });
+    });
+    const port = await listen(silent);
+    const { RpcClient } = loadSource('src/libs/rpc-calls/index.ts');
+    const client = new RpcClient({ host: '127.0.0.1', port, username: 'u', password: 'p', timeout: 200 });
+    const res = await client.call('getblockcount');
+    await sleep(500);
+    silent.close();
+    silent.closeAllConnections?.();
+    assert(res.error === 'ETIMEDOUT', `error ${JSON.stringify(res)}`);
+    assert(serverSideClosed, 'socket still open 500 ms after the client gave up');
+  }],
+];
+
+// ------------------------------------------------------------------ main
+
 const main = async () => {
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'tl-relayer-r11-'));
   process.env.WATCHONLY_REGISTRY_PATH = path.join(scratch, 'registry.json');
   process.env.NETWORK = 'LTC';
+  await new Promise((resolve) => dripServer.listen(0, '127.0.0.1', resolve));
+  process.env.RELAYER_API_URL = `http://127.0.0.1:${dripServer.address().port}`;
   await startCollatorStub();
   const unit = [
     ...ipCases(),
@@ -329,6 +399,8 @@ const main = async () => {
     ...rpcClientCases(),
     ...digestCases(),
     ...partialSnapshotCases(),
+    ...deadlineCases(),
+    ...rpcSocketCases(),
   ];
   for (const [name, fn] of unit) {
     await runCase(name, fn);
@@ -348,6 +420,8 @@ const main = async () => {
     }
   }
 
+  dripServer.close();
+  dripServer.closeAllConnections();
   fs.rmSync(scratch, { recursive: true, force: true });
   console.log(`\n${results.passed} passed, ${results.failed.length} failed`);
   process.exit(results.failed.length === 0 ? 0 : 1);

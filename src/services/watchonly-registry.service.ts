@@ -1,4 +1,3 @@
-import axios from 'axios';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { randomBytes } from 'node:crypto';
@@ -6,6 +5,7 @@ import { randomBytes } from 'node:crypto';
 import { envConfig } from '../config/env.config';
 import { OUTBOUND_LIMITS, validateBootstrapSourceUrl } from './security-utils.service';
 import { utxoSetDigest } from './utxo-digest.service';
+import { OUTBOUND_TIMEOUT_MS, outboundCall } from './outbound.service';
 import { ELogType, saveLog } from './utils.service';
 
 export interface WatchOnlyAccount {
@@ -198,16 +198,17 @@ async function callRpc(method: string, ...params: any[]): Promise<{ data?: any; 
                 ...summarizePortfolioHeartbeatRpc(method, params),
             });
         }
-        const res = await axios.post(
-            `${url}/rpc/route`,
-            {
+        const res = await outboundCall({
+            method: 'POST',
+            url: `${url}/rpc/route`,
+            data: {
                 service: envConfig.COLLATOR_RPC_SERVICE,
                 network: envConfig.COLLATOR_RPC_NETWORK,
                 method,
                 params,
             },
-            { timeout: 15000 },
-        );
+            timeoutMs: OUTBOUND_TIMEOUT_MS,
+        });
 
         const payload: any = res.data || {};
         if (payload.ok === false) {
@@ -617,10 +618,10 @@ export async function bootstrapWatchOnlyRegistryFromSeed(input?: {
     // Issue #1 / C2: never follow redirects on the bootstrap fetch — a public
     // https host could otherwise redirect us to an internal/metadata address.
     // Round 8: the seed snapshot body is capped as well (a seed host could return gigabytes).
-    const response = await axios.get(url, {
-        timeout: 15_000,
-        maxRedirects: 0,
-        maxContentLength: OUTBOUND_LIMITS.bootstrapMaxResponseBytes,
+    const response = await outboundCall({
+        url,
+        timeoutMs: OUTBOUND_TIMEOUT_MS,
+        maxBytes: OUTBOUND_LIMITS.bootstrapMaxResponseBytes,
     });
     const payload: any = response.data || {};
     const entries = Array.isArray(payload?.entries)

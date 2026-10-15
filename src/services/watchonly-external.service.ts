@@ -1,7 +1,6 @@
-import axios from 'axios';
-
 import { envConfig } from '../config/env.config';
 import { isOutboundSafeAddress, OUTBOUND_LIMITS } from './security-utils.service';
+import { OUTBOUND_TIMEOUT_MS, outboundCall } from './outbound.service';
 import { utxoSetDigest } from './utxo-digest.service';
 
 const CHAIN_SO_PAGE_SIZE = 10;
@@ -78,11 +77,11 @@ export async function fetchExternalWatchOnlySnapshot(address: string, network?: 
         // truncated set would compare as a mismatch for every wallet with more outputs than the cap.
         if (page > CHAIN_SO_MAX_PAGES) return null;
         const url = `https://chain.so/api/v3/unspent_outputs/${mappedNetwork}/${encodeURIComponent(safeAddress)}/${page}`;
-        const res = await axios.get(url, {
-            timeout: 15000,
+        const res = await outboundCall({
+            url,
+            timeoutMs: OUTBOUND_TIMEOUT_MS,
+            maxBytes: OUTBOUND_LIMITS.utxoPageMaxResponseBytes,
             headers,
-            maxRedirects: 0,
-            maxContentLength: OUTBOUND_LIMITS.utxoPageMaxResponseBytes,
         });
         const payload: any = res.data || {};
         const outputs = payload?.data?.outputs;

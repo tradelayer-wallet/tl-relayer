@@ -46,13 +46,21 @@ export class RpcClient {
         const request = http.request(requestOptions);
 
         return new Promise((res, rej) => {
-            const reqTimeOut = setTimeout(() => res({ error: 'ETIMEDOUT' }), timeout);
-            request.on('error', (error) => res({ error: error.message }));
-            request.on('response', (response) => {
+            // The deadline covers the headers and the body. A call that gave up destroys its
+            // request, so the socket does not outlive the timeout.
+            const reqTimeOut = setTimeout(() => {
+                request.destroy();
+                res({ error: 'ETIMEDOUT' });
+            }, timeout);
+            request.on('error', (error) => {
                 clearTimeout(reqTimeOut);
+                res({ error: error.message });
+            });
+            request.on('response', (response) => {
                 let buffer = '';
                 response.on('data', (chunk) => buffer += chunk);
                 response.on('end', () => {
+                    clearTimeout(reqTimeOut);
                     const { statusCode } = response;
                     try {
                         if (statusCode === 401) return res({ error: 'Unauthorized', statusCode, IECode: 4 });
