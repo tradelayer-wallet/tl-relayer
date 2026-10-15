@@ -13,6 +13,10 @@
 const http = require('http');
 const net = require('net');
 const h = require('./lib/probe-harness.cjs');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const axios = require('axios');
 const { results, assert, runCase, sleep, loadSource, httpRequest, startRelayer, startProviderStub, ADMIN_KEY, RELAYER_KEY, DIST_ENTRY, ROOT } = h;
 
 const MIB = 1024 * 1024;
@@ -189,15 +193,142 @@ const bodyLimitCases = async (stubPort) => {
   }
 };
 
-// ------------------------------------------------------------------ main
+
+// ------------------------------------------------------------------ bug cases
+
+const ADDR = 'LTCprobeaddress000000000000001';
+const PUB = `02${'ab'.repeat(32)}`;
+const TXA = 'a'.repeat(64);
+const TXB = 'b'.repeat(64);
+const TXC = 'c'.repeat(64);
+
+// Replaces axios.get for the duration of one case and returns the restore function.
+const stubAxiosGet = (impl) => {
+  const original = axios.get;
+  axios.get = impl;
+  return () => { axios.get = original; };
+};
+
+const chainPage = (outputs) => ({ data: { status: 'success', data: { outputs } } });
+const outputsFor = (page, count) =>
+  Array.from({ length: count }, (_, i) => ({
+    hash: (page * 1000 + i).toString(16).padStart(64, '0'),
+    index: 0,
+    value: '0.00000001',
+    confirmations: 5,
+  }));
+
+const digestCases = () => {
+  const verifySet = async (localUtxos, explorerOutputs) => {
+    const registry = loadSource('src/services/watchonly-registry.service.ts');
+    const sochain = loadSource('src/services/sochain.service.ts');
+    const restore = stubAxiosGet(async () => chainPage(explorerOutputs));
+    try {
+      await registry.recordWatchOnlySnapshot({ network: 'LTC', address: ADDR, pubkey: PUB, utxos: localUtxos });
+      return await sochain.verifyWatchOnlyAccountCoverage(ADDR);
+    } finally {
+      restore();
+    }
+  };
+  return [
+    ['R11-DIG BUG a local snapshot equal to the explorer set is not flagged for rescan', async () => {
+      const report = await verifySet(
+        [
+          { txid: TXA, vout: 0, amount: 0.5, confirmations: 10 },
+          { txid: TXB, vout: 1, amount: 0.25, confirmations: 3 },
+        ],
+        [
+          { hash: TXA, index: 0, value: '0.5', confirmations: 10 },
+          { hash: TXB, index: 1, value: '0.25', confirmations: 3 },
+        ],
+      );
+      assert(report.needsRescan === false, `needsRescan true: ${report.reason}`);
+    }],
+    ['R11-DIG BUG confirmations drift and explorer ordering do not make equal sets differ', async () => {
+      const report = await verifySet(
+        [
+          { txid: TXA, vout: 0, amount: 0.1, confirmations: 99 },
+          { txid: TXB, vout: 0, amount: 0.2, confirmations: 50 },
+          { txid: TXC, vout: 0, amount: 0.3, confirmations: 1 },
+        ],
+        [
+          { hash: TXC, index: 0, value: '0.3', confirmations: 2 },
+          { hash: TXB, index: 0, value: '0.2', confirmations: 51 },
+          { hash: TXA, index: 0, value: '0.1', confirmations: 100 },
+        ],
+      );
+      assert(report.needsRescan === false, `needsRescan true: ${report.reason}`);
+    }],
+    ['R11-DIG a missing output is flagged for rescan', async () => {
+      const report = await verifySet(
+        [{ txid: TXA, vout: 0, amount: 0.5, confirmations: 10 }],
+        [
+          { hash: TXA, index: 0, value: '0.5', confirmations: 10 },
+          { hash: TXB, index: 1, value: '0.25', confirmations: 3 },
+        ],
+      );
+      assert(report.needsRescan === true, 'missing output not flagged');
+    }],
+    ['R11-DIG a changed amount is flagged for rescan', async () => {
+      const report = await verifySet(
+        [{ txid: TXA, vout: 0, amount: 0.26, confirmations: 10 }],
+        [{ hash: TXA, index: 0, value: '0.25', confirmations: 10 }],
+      );
+      assert(report.needsRescan === true, 'changed amount not flagged');
+    }],
+  ];
+};
+
+const partialSnapshotCases = () => {
+  const snapshotOf = async (impl) => {
+    const ext = loadSource('src/services/watchonly-external.service.ts');
+    const restore = stubAxiosGet(impl);
+    try {
+      return await ext.fetchExternalWatchOnlySnapshot(ADDR, 'LTC');
+    } finally {
+      restore();
+    }
+  };
+  return [
+    ['R11-PART BUG a chain.so page with a failure status yields no snapshot', async () => {
+      const snap = await snapshotOf(async () => ({ data: { status: 'fail', data: null } }));
+      assert(snap === null, `snapshot with ${snap && snap.count} utxos after a failed page`);
+    }],
+    ['R11-PART BUG a failure on page two does not return page one as the whole set', async () => {
+      const snap = await snapshotOf(async (url) => (
+        url.endsWith('/1') ? chainPage(outputsFor(1, 10)) : { data: { status: 'fail', data: null } }
+      ));
+      assert(snap === null, `partial snapshot with ${snap && snap.count} utxos`);
+    }],
+    ['R11-PART BUG a set that does not end within the page cap is refused, not truncated', async () => {
+      const snap = await snapshotOf(async (url) => {
+        const page = Number(url.split('/').pop());
+        return chainPage(outputsFor(page, 10));
+      });
+      assert(snap === null, `truncated snapshot with ${snap && snap.count} utxos`);
+    }],
+    ['R11-PART a short last page completes the set (control)', async () => {
+      const snap = await snapshotOf(async (url) => {
+        const page = Number(url.split('/').pop());
+        return chainPage(page === 1 ? outputsFor(1, 10) : outputsFor(2, 3));
+      });
+      assert(snap && snap.count === 13, `count ${snap && snap.count}`);
+    }],
+  ];
+};
 
 const main = async () => {
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'tl-relayer-r11-'));
+  process.env.WATCHONLY_REGISTRY_PATH = path.join(scratch, 'registry.json');
+  process.env.NETWORK = 'LTC';
   await startCollatorStub();
   const unit = [
     ...ipCases(),
     ...authCases(),
     ...outboundCases(),
     ...rpcClientCases(),
+    ...digestCases(),
+    ...partialSnapshotCases(),
   ];
   for (const [name, fn] of unit) {
     await runCase(name, fn);
@@ -217,6 +348,7 @@ const main = async () => {
     }
   }
 
+  fs.rmSync(scratch, { recursive: true, force: true });
   console.log(`\n${results.passed} passed, ${results.failed.length} failed`);
   process.exit(results.failed.length === 0 ? 0 : 1);
 };

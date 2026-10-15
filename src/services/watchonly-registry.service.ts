@@ -5,6 +5,7 @@ import { randomBytes } from 'node:crypto';
 
 import { envConfig } from '../config/env.config';
 import { OUTBOUND_LIMITS, validateBootstrapSourceUrl } from './security-utils.service';
+import { utxoSetDigest } from './utxo-digest.service';
 import { ELogType, saveLog } from './utils.service';
 
 export interface WatchOnlyAccount {
@@ -1006,16 +1007,6 @@ function normalizeSnapshotUtxo(utxo: any) {
     };
 }
 
-function computeSnapshotHash(utxos: Array<ReturnType<typeof normalizeSnapshotUtxo>>) {
-    const canonical = (utxos || []).filter(Boolean).slice().sort((a, b) => {
-        if (a.txid === b.txid) {
-            return a.vout - b.vout;
-        }
-        return a.txid.localeCompare(b.txid);
-    });
-    return require('crypto').createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
-}
-
 export async function recordWatchOnlySnapshot(input: {
     network?: string;
     address: string;
@@ -1050,6 +1041,7 @@ export async function recordWatchOnlySnapshot(input: {
     const utxos = (Array.isArray(input.utxos) ? input.utxos : [])
         .map(normalizeSnapshotUtxo)
         .filter(Boolean);
+    const snapshotDigest = utxoSetDigest(utxos);
 
     console.log('[portfolio-heartbeat][relayer][registry] snapshot', {
         address,
@@ -1076,9 +1068,9 @@ export async function recordWatchOnlySnapshot(input: {
         lastSnapshotHeight: normalizeHeight(input.scannedHeight) ?? existing.lastSnapshotHeight ?? null,
         scanSourceNodeId: input.scanSourceNodeId || existing.scanSourceNodeId || null,
         lastUtxoSnapshot: {
-            hash: computeSnapshotHash(utxos),
-            count: utxos.length,
-            totalAmount: utxos.reduce((sum, item) => sum + Number(item.amount || 0), 0),
+            hash: snapshotDigest.digest,
+            count: snapshotDigest.count,
+            totalAmount: snapshotDigest.totalSats / 1e8,
             updatedAt: now,
             scannedHeight: normalizeHeight(input.scannedHeight),
             scanSourceNodeId: input.scanSourceNodeId || existing.scanSourceNodeId || null,

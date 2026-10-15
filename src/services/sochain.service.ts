@@ -338,12 +338,8 @@ export const verifyWatchOnlyAccountCoverage = async (
         }
         : null;
 
-    const mismatch = !!externalSnapshot && (
-        !localSnapshot ||
-        localHash !== externalHash ||
-        Number(localSnapshot.count || 0) !== externalSnapshot.count ||
-        Number(localSnapshot.totalAmount || 0) !== externalSnapshot.totalAmount
-    );
+    // The digest covers the outpoints and the satoshi values, so it also settles count and total.
+    const mismatch = !!externalSnapshot && (!localSnapshot || localHash !== externalHash);
 
     return {
         ok: true,
