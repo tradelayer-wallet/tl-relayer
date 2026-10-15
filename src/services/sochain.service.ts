@@ -13,7 +13,8 @@ import {
 } from "./watchonly-registry.service";
 
 const baseURL = "https://api.blockcypher.com/v1/";
-const token = "a2b9d2c5fbfc49f39589c2751f599725"; // BlockCypher API token
+// BlockCypher API token (M5): never hardcode secrets; read from the environment.
+const token = envConfig.BLOCKCYPHER_TOKEN;
 
 function logPortfolioHeartbeat(scope: string, event: string, details: Record<string, unknown>) {
     console.log(`[portfolio-heartbeat][relayer][${scope}] ${event}`, details);
@@ -337,12 +338,8 @@ export const verifyWatchOnlyAccountCoverage = async (
         }
         : null;
 
-    const mismatch = !!externalSnapshot && (
-        !localSnapshot ||
-        localHash !== externalHash ||
-        Number(localSnapshot.count || 0) !== externalSnapshot.count ||
-        Number(localSnapshot.totalAmount || 0) !== externalSnapshot.totalAmount
-    );
+    // The digest covers the outpoints and the satoshi values, so it also settles count and total.
+    const mismatch = !!externalSnapshot && (!localSnapshot || localHash !== externalHash);
 
     return {
         ok: true,
@@ -440,7 +437,7 @@ export const rescanWatchOnlyAccounts = async (
 
         const staleCoverage = coverage
             .map((item) => item.coverage)
-            .filter((item): item is NonNullable<typeof item> => !!item && (item.needsRescan || force));
+            .filter((item): item is NonNullable<typeof item> => !!item && item.needsRescan);
         const externalMismatch = coverage
             .map((item) => item.externalCoverage)
             .filter((item): item is NonNullable<typeof item> => !!item && item.needsRescan);
@@ -464,7 +461,16 @@ export const rescanWatchOnlyAccounts = async (
 
         let rescanResult: any = null;
         const allowRescan = !!envConfig.WATCHONLY_RESCAN_OPT_IN;
-        const shouldRescan = force || (allowRescan && (staleCoverage.length > 0 || externalMismatch.length > 0));
+        if (force && !allowRescan) {
+            logPortfolioHeartbeat('utxo', 'rescan-force-ignored', {
+                network,
+                address: address || null,
+                reason: 'force:true no longer bypasses WATCHONLY_RESCAN_OPT_IN; request body force is accepted for compatibility but ignored',
+            });
+        }
+        // The WATCHONLY_RESCAN_OPT_IN env gate always applies; a client-supplied
+        // `force` flag must never bypass it (issue #1 / C1).
+        const shouldRescan = allowRescan && (staleCoverage.length > 0 || externalMismatch.length > 0);
         if (shouldRescan) {
             const rescanParams = toHeight == null ? [fromHeight] : [fromHeight, toHeight];
             logPortfolioHeartbeat('utxo', 'rescan-request', {
@@ -495,7 +501,7 @@ export const rescanWatchOnlyAccounts = async (
                 99999999,
                 { address: entry.address, pubkey: entry.pubkey },
                 {
-                    scanState: shouldRescan && (force || entryCoverage?.needsRescan || externalMismatch.some((item) => item.address === entry.address))
+                    scanState: shouldRescan && (entryCoverage?.needsRescan || externalMismatch.some((item) => item.address === entry.address))
                         ? 'backfilled'
                         : 'live',
                     scanSourceNodeId,

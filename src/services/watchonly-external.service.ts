@@ -1,6 +1,10 @@
-import axios from 'axios';
-
 import { envConfig } from '../config/env.config';
+import { isOutboundSafeAddress, OUTBOUND_LIMITS } from './security-utils.service';
+import { OUTBOUND_TIMEOUT_MS, outboundCall } from './outbound.service';
+import { utxoSetDigest } from './utxo-digest.service';
+
+const CHAIN_SO_PAGE_SIZE = 10;
+const CHAIN_SO_MAX_PAGES = 20;
 
 export interface ExternalWatchOnlyUtxo {
     txid: string;
@@ -36,16 +40,6 @@ function normalizeNetwork(network: string): string | null {
     return null;
 }
 
-function computeHash(utxos: ExternalWatchOnlyUtxo[]): string {
-    const canonical = (utxos || []).slice().sort((a, b) => {
-        if (a.txid === b.txid) {
-            return a.vout - b.vout;
-        }
-        return a.txid.localeCompare(b.txid);
-    });
-    return require('crypto').createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
-}
-
 function toUtxo(item: any): ExternalWatchOnlyUtxo | null {
     if (!item || typeof item !== 'object') return null;
     const txid = normalize(String(item.hash || item.txid || ''));
@@ -67,39 +61,48 @@ export async function fetchExternalWatchOnlySnapshot(address: string, network?: 
     if (!mappedNetwork || source !== 'sochain') {
         return null;
     }
+    // Round 8: the address is placed in the URL path, and the API key header is sent with
+    // every page. The address comes from a public route parameter, so a value with `/`,
+    // `..`, `?` or `#` must never reach the request. Fail closed before any outbound call.
+    const safeAddress = normalize(address);
+    if (!isOutboundSafeAddress(safeAddress)) {
+        return null;
+    }
 
     const apiKey = normalize(envConfig.WATCHONLY_EXTERNAL_API_KEY || '');
     const headers = apiKey ? { 'API-KEY': apiKey } : undefined;
     const allUtxos: ExternalWatchOnlyUtxo[] = [];
-    let page = 1;
-    while (page <= 20) {
-        const url = `https://chain.so/api/v3/unspent_outputs/${mappedNetwork}/${address}/${page}`;
-        const res = await axios.get(url, {
-            timeout: 15000,
+    for (let page = 1; ; page += 1) {
+        // A set that is still going after the page cap is refused rather than reported: a
+        // truncated set would compare as a mismatch for every wallet with more outputs than the cap.
+        if (page > CHAIN_SO_MAX_PAGES) return null;
+        const url = `https://chain.so/api/v3/unspent_outputs/${mappedNetwork}/${encodeURIComponent(safeAddress)}/${page}`;
+        const res = await outboundCall({
+            url,
+            timeoutMs: OUTBOUND_TIMEOUT_MS,
+            maxBytes: OUTBOUND_LIMITS.utxoPageMaxResponseBytes,
             headers,
         });
         const payload: any = res.data || {};
-        if (String(payload?.status || '').toLowerCase() !== 'success') {
-            break;
-        }
-        const outputs = Array.isArray(payload?.data?.outputs) ? payload.data.outputs : [];
-        const mapped = outputs.map(toUtxo).filter(Boolean) as ExternalWatchOnlyUtxo[];
-        allUtxos.push(...mapped);
-        if (outputs.length < 10) {
-            break;
-        }
-        page += 1;
+        const outputs = payload?.data?.outputs;
+        // A page that is not a success answer, or that carries an unreadable output, makes the
+        // whole set unknown. Reporting the pages read so far would present a partial set as complete.
+        if (String(payload?.status || '').toLowerCase() !== 'success' || !Array.isArray(outputs)) return null;
+        const mapped = outputs.map(toUtxo);
+        if (mapped.some((utxo: ExternalWatchOnlyUtxo | null) => utxo === null)) return null;
+        allUtxos.push(...(mapped as ExternalWatchOnlyUtxo[]));
+        if (outputs.length < CHAIN_SO_PAGE_SIZE) break;
     }
 
-    const checkedAt = Date.now();
+    const digest = utxoSetDigest(allUtxos);
     return {
         source: 'sochain',
         network: mappedNetwork,
-        address: normalize(address),
-        checkedAt,
-        hash: computeHash(allUtxos),
-        count: allUtxos.length,
-        totalAmount: allUtxos.reduce((sum, item) => sum + Number(item.amount || 0), 0),
+        address: safeAddress,
+        checkedAt: Date.now(),
+        hash: digest.digest,
+        count: digest.count,
+        totalAmount: digest.totalSats / 1e8,
         utxos: allUtxos,
     };
 }

@@ -1,6 +1,9 @@
 // src/routes/attestation.route.ts
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import { isIP } from 'net';
+import { envConfig } from '../config/env.config';
 import { AttestationService } from '../services/attestation.service';
+import { isTrustedProxyPeer, rateLimitKey, resolveClientIp } from '../services/security-utils.service';
 
 const attestationService = new AttestationService();
 
@@ -8,39 +11,43 @@ type AttestationIpBody = {
   ip?: string;
 };
 
-function extractClientIp(req: FastifyRequest): string {
-  const headers = req.headers;
+// Issue #1 / H3 + round 2 / NEW-2: forwarding headers are believed only when
+// TRUST_PROXY=1 and the TCP peer is one of TRUST_PROXY_CIDRS (validated at
+// startup). Everything in this route that depends on the caller's IP goes
+// through resolveClientIp with this list.
+const trustedProxies = (): string[] => (envConfig.TRUST_PROXY ? envConfig.TRUST_PROXY_CIDRS : []);
 
-  // Cloudflare first
-  const cfIp = headers['cf-connecting-ip'];
-  if (typeof cfIp === 'string' && cfIp.length > 0) return cfIp;
+// Issue #1 round 2 / NEW-5: the public /attestation/* routes fan out to several
+// outbound reputation providers per request. Bound both the per-client request
+// rate (fixed window, keyed on the resolved client IP; IPv6 per /64) and the global number of
+// lookups in flight.
+const RATE_WINDOW_MS = 60 * 1000;
+const MAX_TRACKED_CLIENTS = 4096;
 
-  // Nginx real_ip / forwarded_for chain
-  const xRealIp = headers['x-real-ip'];
-  if (typeof xRealIp === 'string' && xRealIp.length > 0) return xRealIp;
+type RateWindow = { count: number; windowStart: number };
+const rateWindows = new Map<string, RateWindow>();
+let inFlight = 0;
 
-  const xff = headers['x-forwarded-for'];
-  if (typeof xff === 'string' && xff.length > 0) {
-    return xff.split(',')[0].trim();
+function consumeRateToken(clientKey: string): boolean {
+  const now = Date.now();
+  let win = rateWindows.get(clientKey);
+  if (!win || now - win.windowStart >= RATE_WINDOW_MS) {
+    // Keep the table bounded: when full, evict the oldest-inserted client.
+    if (!win && rateWindows.size >= MAX_TRACKED_CLIENTS) {
+      const oldest = rateWindows.keys().next();
+      if (!oldest.done) rateWindows.delete(oldest.value);
+    }
+    win = { count: 0, windowStart: now };
+    rateWindows.set(clientKey, win);
   }
-  if (Array.isArray(xff) && xff.length > 0) {
-    return String(xff[0]).split(',')[0].trim();
-  }
-
-  // Fallback: Fastify's notion of IP (may be proxy if real_ip not configured)
-  return req.ip;
+  if (win.count >= envConfig.ATTESTATION_RATE_LIMIT_PER_MIN) return false;
+  win.count += 1;
+  return true;
 }
 
 export async function registerAttestationRoutes(server: FastifyInstance) {
-  const handleIpCheck = async (
-    req: FastifyRequest<{ Body?: AttestationIpBody }>,
-    reply: FastifyReply,
-  ) => {
-    const bodyIp = typeof req.body?.ip === 'string' ? req.body.ip.trim() : '';
-    const allowIpOverride = process.env.ATTESTATION_ALLOW_IP_OVERRIDE === '1';
-    const ip = allowIpOverride && bodyIp ? bodyIp : extractClientIp(req);
-
-    if (!ip) {
+  const lookupIpReputation = async (ipInput: string, reply: FastifyReply) => {
+    if (!ipInput) {
       reply.code(400);
       return {
         success: false,
@@ -48,20 +55,68 @@ export async function registerAttestationRoutes(server: FastifyInstance) {
       };
     }
 
+    // Issue #1 / H3: never interpolate an unvalidated string into outbound URLs.
+    const normalizedIp = ipInput.trim().replace(/^::ffff:/, '');
+    if (!isIP(normalizedIp)) {
+      reply.code(400);
+      return {
+        success: false,
+        error: 'Invalid client IP',
+      };
+    }
+
     try {
-      const result = await attestationService.checkIp(ip);
+      const result = await attestationService.checkIp(normalizedIp);
       return result;
     } catch (err: any) {
-      console.error(
-        { err },
-        '[attestation] Failed to check IP reputation',
-      );
+      // Message only: the error object carries axios's request config (provider
+      // URLs with the IPinfo token, and the CriminalIP key header).
+      console.error('[attestation] Failed to check IP reputation:', err?.message || 'unknown error');
       reply.code(500);
       return {
         success: false,
-        ip,
+        ip: normalizedIp,
         error: 'Internal error while checking IP reputation',
       };
+    }
+  };
+
+  const handleIpCheck = async (
+    req: FastifyRequest<{ Body?: AttestationIpBody }>,
+    reply: FastifyReply,
+  ) => {
+    // Quota and concurrency gates run before any body parsing or outbound work.
+    // The client identity is always the resolved client IP, never the body value,
+    // so a request cannot choose its own rate-limit bucket.
+    const peer = String((req.socket && req.socket.remoteAddress) || '');
+    const trusted = trustedProxies();
+    const clientIp = resolveClientIp(peer, req.headers, trusted);
+    if (!consumeRateToken(rateLimitKey(clientIp) || 'unknown')) {
+      reply.code(429).header('retry-after', '60');
+      return {
+        success: false,
+        error: 'Rate limit exceeded for IP reputation lookups',
+      };
+    }
+    if (inFlight >= envConfig.ATTESTATION_MAX_IN_FLIGHT) {
+      reply.code(503).header('retry-after', '1');
+      return {
+        success: false,
+        error: 'Too many IP reputation lookups in flight; retry shortly',
+      };
+    }
+
+    inFlight += 1;
+    try {
+      // Issue #1 / H3: the body IP override is honored only when the operator
+      // enables it AND the direct peer is a trusted proxy forwarding an end-user
+      // address (issue #1 round 2 / NEW-2).
+      const bodyIp = typeof req.body?.ip === 'string' ? req.body.ip.trim() : '';
+      const overrideAllowed =
+        envConfig.ATTESTATION_ALLOW_IP_OVERRIDE && isTrustedProxyPeer(peer, trusted);
+      return await lookupIpReputation(overrideAllowed && bodyIp ? bodyIp : clientIp, reply);
+    } finally {
+      inFlight -= 1;
     }
   };
 

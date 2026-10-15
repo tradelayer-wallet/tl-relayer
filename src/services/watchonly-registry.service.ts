@@ -1,9 +1,11 @@
-import axios from 'axios';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { randomBytes } from 'node:crypto';
 
 import { envConfig } from '../config/env.config';
+import { OUTBOUND_LIMITS, validateBootstrapSourceUrl } from './security-utils.service';
+import { utxoSetDigest } from './utxo-digest.service';
+import { OUTBOUND_TIMEOUT_MS, outboundCall } from './outbound.service';
 import { ELogType, saveLog } from './utils.service';
 
 export interface WatchOnlyAccount {
@@ -196,16 +198,17 @@ async function callRpc(method: string, ...params: any[]): Promise<{ data?: any; 
                 ...summarizePortfolioHeartbeatRpc(method, params),
             });
         }
-        const res = await axios.post(
-            `${url}/rpc/route`,
-            {
+        const res = await outboundCall({
+            method: 'POST',
+            url: `${url}/rpc/route`,
+            data: {
                 service: envConfig.COLLATOR_RPC_SERVICE,
                 network: envConfig.COLLATOR_RPC_NETWORK,
                 method,
                 params,
             },
-            { timeout: 15000 },
-        );
+            timeoutMs: OUTBOUND_TIMEOUT_MS,
+        });
 
         const payload: any = res.data || {};
         if (payload.ok === false) {
@@ -568,8 +571,8 @@ export async function bootstrapWatchOnlyRegistryFromSeed(input?: {
     network?: string;
     force?: boolean;
 }) {
-    const sourceUrl = trimSlash(String(input?.sourceUrl || envConfig.WATCHONLY_REGISTRY_SEED_URL || ''));
-    if (!sourceUrl) {
+    const rawSourceUrl = trimSlash(String(input?.sourceUrl || envConfig.WATCHONLY_REGISTRY_SEED_URL || ''));
+    if (!rawSourceUrl) {
         return {
             imported: 0,
             refreshed: 0,
@@ -581,6 +584,18 @@ export async function bootstrapWatchOnlyRegistryFromSeed(input?: {
             sourceUrl: null,
         };
     }
+
+    // Issue #1 / C2 (defense at the sink): every caller — including the
+    // background startup/reconcile path that falls back to
+    // WATCHONLY_REGISTRY_SEED_URL — must pass the SSRF/https policy before any
+    // fetch happens. Never fetch a refused source.
+    const validated = validateBootstrapSourceUrl(rawSourceUrl, envConfig.ALLOW_INSECURE_BOOTSTRAP);
+    if (!validated.ok || !validated.sourceUrl) {
+        const message = `Bootstrap seed URL refused: ${validated.error || 'invalid source URL'}`;
+        console.warn(`[watchonly-registry] ${message} (${rawSourceUrl})`);
+        throw new Error(message);
+    }
+    const sourceUrl = validated.sourceUrl;
 
     const current = await loadWatchOnlyRegistrySnapshot();
     if (!input?.force && current.entries.length > 0) {
@@ -600,7 +615,14 @@ export async function bootstrapWatchOnlyRegistryFromSeed(input?: {
         ? `${sourceUrl}/address/watchonly?network=${encodeURIComponent(String(input.network))}`
         : `${sourceUrl}/address/watchonly`;
 
-    const response = await axios.get(url, { timeout: 15_000 });
+    // Issue #1 / C2: never follow redirects on the bootstrap fetch — a public
+    // https host could otherwise redirect us to an internal/metadata address.
+    // Round 8: the seed snapshot body is capped as well (a seed host could return gigabytes).
+    const response = await outboundCall({
+        url,
+        timeoutMs: OUTBOUND_TIMEOUT_MS,
+        maxBytes: OUTBOUND_LIMITS.bootstrapMaxResponseBytes,
+    });
     const payload: any = response.data || {};
     const entries = Array.isArray(payload?.entries)
         ? payload.entries
@@ -986,16 +1008,6 @@ function normalizeSnapshotUtxo(utxo: any) {
     };
 }
 
-function computeSnapshotHash(utxos: Array<ReturnType<typeof normalizeSnapshotUtxo>>) {
-    const canonical = (utxos || []).filter(Boolean).slice().sort((a, b) => {
-        if (a.txid === b.txid) {
-            return a.vout - b.vout;
-        }
-        return a.txid.localeCompare(b.txid);
-    });
-    return require('crypto').createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
-}
-
 export async function recordWatchOnlySnapshot(input: {
     network?: string;
     address: string;
@@ -1030,6 +1042,7 @@ export async function recordWatchOnlySnapshot(input: {
     const utxos = (Array.isArray(input.utxos) ? input.utxos : [])
         .map(normalizeSnapshotUtxo)
         .filter(Boolean);
+    const snapshotDigest = utxoSetDigest(utxos);
 
     console.log('[portfolio-heartbeat][relayer][registry] snapshot', {
         address,
@@ -1056,9 +1069,9 @@ export async function recordWatchOnlySnapshot(input: {
         lastSnapshotHeight: normalizeHeight(input.scannedHeight) ?? existing.lastSnapshotHeight ?? null,
         scanSourceNodeId: input.scanSourceNodeId || existing.scanSourceNodeId || null,
         lastUtxoSnapshot: {
-            hash: computeSnapshotHash(utxos),
-            count: utxos.length,
-            totalAmount: utxos.reduce((sum, item) => sum + Number(item.amount || 0), 0),
+            hash: snapshotDigest.digest,
+            count: snapshotDigest.count,
+            totalAmount: snapshotDigest.totalSats / 1e8,
             updatedAt: now,
             scannedHeight: normalizeHeight(input.scannedHeight),
             scanSourceNodeId: input.scanSourceNodeId || existing.scanSourceNodeId || null,
