@@ -23,6 +23,17 @@ export const secureCompare = (provided: string, expected: string): boolean => {
  * stripped from client-supplied headers in ws-relay.service.ts, so external
  * callers cannot forge it.
  */
+/**
+ * Largest HTTP request body and largest WebSocket relay frame. A frame is buffered whole before
+ * the relay sees it, and both surfaces must accept the same request size.
+ */
+export const REQUEST_BODY_LIMIT_BYTES = 1024 * 1024;
+
+/** Headers each credential gate reads, and the message a refused request gets. */
+export const RELAYER_KEY_HEADERS = ['x-api-key'];
+export const FAUCET_KEY_HEADERS = ['x-api-key', 'x-admin-api-key'];
+export const MISSING_KEY_MESSAGE = 'Missing or invalid x-api-key header';
+
 export const INTERNAL_RELAY_AUTH_HEADER = 'x-internal-relay-auth';
 export const INTERNAL_RELAY_AUTH_TOKEN = randomBytes(32).toString('hex');
 

@@ -1,7 +1,7 @@
-import axios from 'axios';
 import { envConfig } from "../config/env.config";
 import { rpcClient } from "../config/rpc.config";
-import { ELogType, saveLog } from "./utils.service";
+import { ELogType, errorMessageOf, saveLog } from "./utils.service";
+import { OUTBOUND_TIMEOUT_MS, outboundCall } from "./outbound.service";
 import {
     reconcileWatchOnlyRegistry,
     getWatchOnlyRegistryEntry,
@@ -211,9 +211,14 @@ async function callTradeLayerListener(method: string, params: any[]): Promise<Rp
     try {
         const url = `${trimSlash(envConfig.TL_LISTENER_URL)}/${listenerMethod}`;
         const normalizedMethod = String(method || '').trim().toLowerCase();
-        const res = TRADELAYER_LISTENER_GET_METHODS.has(normalizedMethod)
-            ? await axios.get(url, { params: buildListenerQuery(method, params), timeout: 15000 })
-            : await axios.post(url, buildListenerBody(method, params), { timeout: 15000 });
+        const isGet = TRADELAYER_LISTENER_GET_METHODS.has(normalizedMethod);
+        const res = await outboundCall({
+            method: isGet ? 'GET' : 'POST',
+            url,
+            params: isGet ? buildListenerQuery(method, params) : undefined,
+            data: isGet ? undefined : buildListenerBody(method, params),
+            timeoutMs: OUTBOUND_TIMEOUT_MS,
+        });
         return { data: res.data };
     } catch (error: any) {
         const payload = error?.response?.data;
@@ -339,9 +344,10 @@ export async function callAllocatedRpc(
             preferredProviderNodeId: providerNodeId || null,
             route: '/rpc/route',
         });
-        const res = await axios.post(
-            `${url}/rpc/route`,
-            {
+        const res = await outboundCall({
+            method: 'POST',
+            url: `${url}/rpc/route`,
+            data: {
                 service: options.service || envConfig.COLLATOR_RPC_SERVICE,
                 network: options.network || envConfig.COLLATOR_RPC_NETWORK,
                 method: routedMethod,
@@ -350,8 +356,8 @@ export async function callAllocatedRpc(
                 preferredProviderNodeId: providerNodeId,
                 sourceEndpoint: 'testnet-api',
             },
-            { timeout: 15000 },
-        );
+            timeoutMs: OUTBOUND_TIMEOUT_MS,
+        });
 
         const payload: any = res.data || {};
         if (payload.ok === false) {
@@ -487,17 +493,18 @@ export async function callRpc(method: string, ...params: any[]): Promise<RpcResu
                 ...summarizePortfolioHeartbeatRpc(method, params),
             });
         }
-        const res = await axios.post(
-            `${url}/rpc/route`,
-            {
+        const res = await outboundCall({
+            method: 'POST',
+            url: `${url}/rpc/route`,
+            data: {
                 service: envConfig.COLLATOR_RPC_SERVICE,
                 network: envConfig.COLLATOR_RPC_NETWORK,
                 method: routedMethod,
                 params,
                 sourceEndpoint: 'testnet-api',
             },
-            { timeout: 15000 },
-        );
+            timeoutMs: OUTBOUND_TIMEOUT_MS,
+        });
 
         const payload: any = res.data || {};
         if (payload.ok === false) {
@@ -578,7 +585,7 @@ export const getAddressBalance = async (address: string) => {
         });
         return balances;
     } catch (error: unknown) {
-        const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+        const errorMessage = errorMessageOf(error);
         const cached = await getWatchOnlyRegistryEntry(String(address || '').trim());
         const cachedBalances = cached?.lastTokenSnapshot?.balances || [];
         if (cachedBalances.length) {
@@ -657,7 +664,7 @@ export const importPubKey = async (_server: any, params: any[]): Promise<{ data?
         });
         return { data: !!first?.imported };
     } catch (error: unknown) {
-        const errorMessage = error instanceof Error ? error.message : "An unexpected error occurred";
+        const errorMessage = errorMessageOf(error);
         return { error: errorMessage };
     }
 };
@@ -715,7 +722,7 @@ export const importWatchOnlyAccounts = async (
             },
         };
     } catch (error: unknown) {
-        const errorMessage = error instanceof Error ? error.message : "An unexpected error occurred";
+        const errorMessage = errorMessageOf(error);
         console.warn('[portfolio-heartbeat][relayer][watchonly-sync] failed', errorMessage);
         return { error: errorMessage };
     }

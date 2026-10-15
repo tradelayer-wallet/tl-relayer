@@ -4,10 +4,14 @@ import { handleRoutes } from './routes/routes';
 import { handleRpcConnection } from './config/rpc.config';
 import { envConfig } from './config/env.config';
 import {
+    FAUCET_KEY_HEADERS,
     headerCredentialMatches,
     isBroadProxyCidr,
     isInternalRelayRequest,
     isValidProxyCidr,
+    MISSING_KEY_MESSAGE,
+    RELAYER_KEY_HEADERS,
+    REQUEST_BODY_LIMIT_BYTES,
     scrubSensitiveQuery,
 } from './services/security-utils.service';
 import { WsRelayService } from './services/ws-relay.service';
@@ -155,10 +159,10 @@ class FastifyServer {
             // WS path and when RELAYER_API_KEY is unset).
             const isFaucet = route !== null && isFaucetRoute(route);
             const authorized = isFaucet
-                ? headerCredentialMatches(request.headers, ['x-api-key', 'x-admin-api-key'], envConfig.ADMIN_API_KEY)
-                : headerCredentialMatches(request.headers, ['x-api-key'], apiKey);
+                ? headerCredentialMatches(request.headers, FAUCET_KEY_HEADERS, envConfig.ADMIN_API_KEY)
+                : headerCredentialMatches(request.headers, RELAYER_KEY_HEADERS, apiKey);
             if (authorized) return;
-            reply.code(401).send({ error: 'Missing or invalid x-api-key header' });
+            reply.code(401).send({ error: MISSING_KEY_MESSAGE });
             return reply;
         });
     }
@@ -198,6 +202,7 @@ const options: FastifyServerOptions = {
     // snapshot write on /address/balance, an external fetch on /address/watchonly/:address/verify),
     // so HEAD is not exposed anywhere. This one option is the single enforcement point.
     exposeHeadRoutes: false,
+    bodyLimit: REQUEST_BODY_LIMIT_BYTES,
     logger: {
         serializers: {
             req: (req: { method?: string; url?: string }) => ({

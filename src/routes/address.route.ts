@@ -2,7 +2,8 @@ import { FastifyInstance, FastifyRequest } from "fastify";
 import { fundAddress, getAddressBalance, importWatchOnlyAccounts, validateAddress } from "../services/address.service";
 import { listunspent, rescanWatchOnlyAccounts, verifyWatchOnlyAccountCoverage } from "../services/sochain.service"; // Import the new function
 import { envConfig } from "../config/env.config";
-import { headerCredentialMatches, scrubSensitiveQuery, validateBootstrapSourceUrl } from "../services/security-utils.service";
+import { FAUCET_KEY_HEADERS, headerCredentialMatches, scrubSensitiveQuery, validateBootstrapSourceUrl } from "../services/security-utils.service";
+import { errorMessageOf } from "../services/utils.service";
 import {
     bootstrapWatchOnlyRegistryFromSeed,
     getWatchOnlyCoverage,
@@ -32,7 +33,7 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
             const res = await validateAddress(address);
             reply.send(res);
         } catch (error: unknown) {
-            const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+            const errorMessage = errorMessageOf(error);
             reply.status(500).send({ error: errorMessage });
         }
     });
@@ -55,7 +56,7 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
             });
             reply.send(res);
         } catch (error: unknown) {
-            const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+            const errorMessage = errorMessageOf(error);
             reply.status(500).send({ error: errorMessage });
         }
     });
@@ -73,7 +74,7 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
             // Fail closed: ADMIN_API_KEY must match in x-admin-api-key or x-api-key,
             // the same rule the API-key hook applies. (Startup also refuses to run
             // with FAUCET_ENABLED and no ADMIN_API_KEY.)
-            if (!headerCredentialMatches(request.headers, ['x-admin-api-key', 'x-api-key'], envConfig.ADMIN_API_KEY)) {
+            if (!headerCredentialMatches(request.headers, FAUCET_KEY_HEADERS, envConfig.ADMIN_API_KEY)) {
                 reply.status(403).send({ error: 'Forbidden' });
                 return;
             }
@@ -81,7 +82,7 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
             const res = await fundAddress(address);
             reply.send(res);
         } catch (error: unknown) {
-            const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+            const errorMessage = errorMessageOf(error);
             reply.status(500).send({ error: errorMessage });
         }
     });
@@ -128,8 +129,7 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
                     reply.send(res.data);
                 }
             } catch (error: unknown) {
-                const errorMessage =
-                    error instanceof Error ? error.message : "An unexpected error occurred";
+                const errorMessage = errorMessageOf(error);
                 reply.status(500).send({ error: errorMessage });
             }
         }
@@ -158,8 +158,7 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
                     entries,
                 });
             } catch (error: unknown) {
-                const errorMessage =
-                    error instanceof Error ? error.message : "An unexpected error occurred";
+                const errorMessage = errorMessageOf(error);
                 reply.status(500).send({ error: errorMessage });
             }
         }
@@ -189,8 +188,7 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
                     entry: entries[0] || null,
                 });
             } catch (error: unknown) {
-                const errorMessage =
-                    error instanceof Error ? error.message : "An unexpected error occurred";
+                const errorMessage = errorMessageOf(error);
                 reply.status(500).send({ error: errorMessage });
             }
         }
@@ -216,8 +214,7 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
                     coverage,
                 });
             } catch (error: unknown) {
-                const errorMessage =
-                    error instanceof Error ? error.message : "An unexpected error occurred";
+                const errorMessage = errorMessageOf(error);
                 reply.status(500).send({ error: errorMessage });
             }
         }
@@ -266,8 +263,7 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
 
                 reply.send({ ok: true, ...res });
             } catch (error: unknown) {
-                const errorMessage =
-                    error instanceof Error ? error.message : "An unexpected error occurred";
+                const errorMessage = errorMessageOf(error);
                 reply.status(500).send({ error: errorMessage });
             }
         }
@@ -293,8 +289,7 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
                 const report = await verifyWatchOnlyAccountCoverage(address, network);
                 reply.send({ ok: true, report });
             } catch (error: unknown) {
-                const errorMessage =
-                    error instanceof Error ? error.message : "An unexpected error occurred";
+                const errorMessage = errorMessageOf(error);
                 reply.status(500).send({ error: errorMessage });
             }
         }
@@ -353,8 +348,7 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
                     reply.send(res.data);
                 }
             } catch (error: unknown) {
-                const errorMessage =
-                    error instanceof Error ? error.message : "An unexpected error occurred";
+                const errorMessage = errorMessageOf(error);
                 reply.status(500).send({ error: errorMessage });
             }
         }
@@ -400,8 +394,7 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
 
                 reply.send({ ok: true, entry: snapshot });
             } catch (error: unknown) {
-                const errorMessage =
-                    error instanceof Error ? error.message : "An unexpected error occurred";
+                const errorMessage = errorMessageOf(error);
                 reply.status(500).send({ error: errorMessage });
             }
         }
@@ -447,8 +440,7 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
                 });
                 reply.send({ ok: true, entry: res });
             } catch (error: unknown) {
-                const errorMessage =
-                    error instanceof Error ? error.message : "An unexpected error occurred";
+                const errorMessage = errorMessageOf(error);
                 reply.status(500).send({ error: errorMessage });
             }
         }
@@ -499,8 +491,7 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
                     reply.send(res.data);
                 }
             } catch (error: unknown) {
-                const errorMessage =
-                    error instanceof Error ? error.message : "An unexpected error occurred";
+                const errorMessage = errorMessageOf(error);
                 reply.status(500).send({ error: errorMessage });
             }
         }

@@ -5,6 +5,8 @@ import { envConfig } from "../config/env.config";
 import {
   INTERNAL_RELAY_AUTH_HEADER,
   INTERNAL_RELAY_AUTH_TOKEN,
+  MISSING_KEY_MESSAGE,
+  REQUEST_BODY_LIMIT_BYTES,
   scrubSensitiveQuery,
   secureCompare,
 } from "./security-utils.service";
@@ -17,12 +19,6 @@ type WsRelayRequest = {
   body?: any;
   headers?: Record<string, string>;
 };
-
-// Round 8: largest WebSocket frame accepted. The ws default is 100 MiB, and a frame is buffered
-// whole before the relay sees it, so one connection could hold 100 MiB per message. 1 MiB matches
-// the HTTP body limit (Fastify's default bodyLimit), so both surfaces accept the same request size.
-// A larger frame closes the connection with 1009 before it is parsed.
-const WS_RELAY_MAX_PAYLOAD_BYTES = 1024 * 1024;
 
 // Methods the relayed routes use. Anything else is refused before app.inject (round 7 / F-B3).
 const WS_RELAY_METHODS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]);
@@ -82,7 +78,8 @@ export class WsRelayService {
   private wss: WebSocketServer;
 
   constructor(private app: FastifyInstance) {
-    this.wss = new WebSocketServer({ noServer: true, maxPayload: WS_RELAY_MAX_PAYLOAD_BYTES });
+    // A frame above the body limit closes the connection with 1009 before it is parsed.
+    this.wss = new WebSocketServer({ noServer: true, maxPayload: REQUEST_BODY_LIMIT_BYTES });
     this.attachUpgradeHandler();
   }
 
@@ -107,7 +104,7 @@ export class WsRelayService {
         console.warn(
           `[security] WS handshake rejected for ${scrubSensitiveQuery(req.url || url.pathname, "redact")}`
         );
-        const body = JSON.stringify({ error: "Missing or invalid x-api-key header" });
+        const body = JSON.stringify({ error: MISSING_KEY_MESSAGE });
         socket.write(
           "HTTP/1.1 401 Unauthorized\r\n" +
             "Connection: close\r\n" +
