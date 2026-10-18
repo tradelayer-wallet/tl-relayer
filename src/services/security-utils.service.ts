@@ -282,6 +282,17 @@ export const isTrustedProxyPeer = (peerAddress: string, trustedProxies: string[]
     trustedProxies.some((entry) => isIpInCidr(peerAddress, entry));
 
 /**
+ * One X-Forwarded-For hop under the shared rule (vectors: scripts/fixtures/client-ip-vectors.json,
+ * the same bytes as tl-collator's). Only a bare IP literal is a hop: brackets, zone identifiers,
+ * trailing dots, ports and empty entries are malformed (round 12 / F5).
+ */
+const forwardedHop = (raw: string): string | null => {
+    const hop = raw.trim();
+    if (!isIP(hop) || hop.includes('%')) return null;
+    return canonicalIp(hop);
+};
+
+/**
  * The single trusted-client-IP resolver (issue #1 round 2 / NEW-2, round 3 / F1).
  * Anything that depends on the caller's IP must go through this function.
  *
@@ -305,7 +316,7 @@ export const resolveClientIp = (
 
     const xff = headers['x-forwarded-for'];
     if (xff === undefined || typeof xff !== 'string' || xff.trim() === '') return peer;
-    const hops = xff.split(',').map((hop) => canonicalIp(hop));
+    const hops = xff.split(',').map(forwardedHop);
     if (hops.some((hop) => hop === null)) return peer;
     const chain = hops as string[];
     for (let i = chain.length - 1; i >= 0; i -= 1) {
