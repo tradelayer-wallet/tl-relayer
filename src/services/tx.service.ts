@@ -318,6 +318,10 @@ export function computeMultisigData(
 
 
 /** Safe number helper, to avoid float issues. Customize as needed. */
+const SATS_PER_COIN = 1e8;
+// Change smaller than this is not worth an output; it stays in the fee.
+const CHANGE_DUST_SATS = 10_000;
+
 export const safeNumber = (value: number, decimals = 8): number => {
   return parseFloat(value.toFixed(decimals));
 };
@@ -469,10 +473,24 @@ export const buildTx = async (txConfig: IBuildTxConfig, isApiMode: boolean) => {
       throw new Error('Not enough inputs to cover the amount + fee');
     }
 
+    // The recipient gets `amount` less the fee. Inputs beyond `amount` (a large UTXO picked largest-first)
+    // come back to the sender as change: without it every satoshi above `amount` goes to the miners.
+    // Change under the dust floor is left to the fee, which bounds what a rounding remainder can cost.
     const sendAmountBtc = safeNumber(amount! - fee);
+    const inputSats = finalInputs.reduce((sum, inp) => sum + Math.round(inp.amount * SATS_PER_COIN), 0);
+    const changeSats = inputSats - Math.round(amount! * SATS_PER_COIN);
     const outputs: Record<string, number| string> = {
-      [toAddress]: sendAmountBtc, 
+      [toAddress]: sendAmountBtc,
     };
+    if (changeSats >= CHANGE_DUST_SATS) {
+      const changeBtc = changeSats / SATS_PER_COIN;
+      outputs[fromAddress] = toAddress === fromAddress ? safeNumber(sendAmountBtc + changeBtc) : changeBtc;
+    }
+    const paidSats = Object.values(outputs).reduce<number>((sum, v) => sum + Math.round(Number(v) * SATS_PER_COIN), 0);
+    const impliedFeeSats = inputSats - paidSats;
+    if (impliedFeeSats > Math.round(fee * SATS_PER_COIN) + CHANGE_DUST_SATS) {
+      throw new Error(`Refusing to build a transaction that pays ${impliedFeeSats} satoshis in fee`);
+    }
 
     const psbtInputs = finalInputs.map(inp => ({
       txid: inp.txid,

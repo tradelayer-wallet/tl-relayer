@@ -14,6 +14,8 @@
     "verify:round8-hardening": "node scripts/verify-round8-hardening.cjs",
     "verify:round10-hardening": "node scripts/verify-round10-hardening.cjs",
     "verify:round11-hardening": "node scripts/verify-round11-hardening.cjs",
+    "verify:round12-hardening": "node scripts/verify-round12-hardening.cjs",
+    "verify:round16-hardening": "node scripts/verify-round16-hardening.cjs",
     "start": "node ./dist/index.js",
     "start:watch": "nodemon ./dist/index.js"
   },
