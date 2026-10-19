@@ -279,10 +279,11 @@ const r4 = async () => {
 // ------------------------------------------------------------ R5: commit UTXO exclusion matches on vout
 
 const r5 = async () => {
+  // bech32 addresses: createrawtransaction infers the network from an "ltc" prefix only.
   const T = 'aa'.repeat(32);
-  const buyer = p2pkh(P1);
-  const seller = p2pkh(P2);
-  const spk = bitcoin.payments.p2pkh({ pubkey: Buffer.from(P1, 'hex'), network: LTC_NET }).output.toString('hex');
+  const buyer = p2wpkh(P1);
+  const seller = p2wpkh(P2);
+  const spk = bitcoin.payments.p2wpkh({ pubkey: Buffer.from(P1, 'hex'), network: LTC_NET }).output.toString('hex');
   const normal = { txid: T, vout: 0, amount: 3.5, scriptPubKey: spk, address: buyer };
   const commit = (vout) => ({ txid: T, vout, amount: 0.5, scriptPubKey: spk, address: buyer });
 
