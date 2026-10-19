@@ -990,10 +990,6 @@ export async function recordTradeLayerRpcSnapshot(input: {
         },
     };
 
-    const registry = await getRegistryEntries();
-    await persistRegistryEntries(registry).catch((error) => {
-        console.warn('[watchonly-registry] persist skipped after trade-layer snapshot:', (error as Error)?.message || error);
-    });
     return tradeLayerStateCache.byMethod[method];
 }
 
@@ -1161,64 +1157,6 @@ export async function recordWatchOnlySnapshot(input: {
     registry.set(key, next);
     await persistRegistryEntries(registry).catch((error) => {
         console.warn('[watchonly-registry] persist skipped after snapshot:', (error as Error)?.message || error);
-    });
-    return next;
-}
-
-export async function recordWatchOnlyTokenSnapshot(input: {
-    network?: string;
-    address: string;
-    pubkey?: string;
-    balances: Array<{
-        propertyId: string | number;
-        ticker?: string;
-        amount: number;
-        available: number;
-        reserved: number;
-        margin: number;
-        vesting: number;
-        channel: number;
-    }>;
-    scannedHeight?: number | null;
-    scanSourceNodeId?: string | null;
-}) {
-    const registry = await getRegistryEntries();
-    const now = Date.now();
-    const address = normalize(input.address);
-    const pubkey = normalize(input.pubkey || '');
-    if (!address) return null;
-
-    const existing = registry.get(address) || {
-        address,
-        pubkey: pubkey || '',
-        source: 'snapshot',
-        firstSeenAt: now,
-        lastSeenAt: now,
-        lastImportedAt: null,
-        importCount: 0,
-    } as WatchOnlyRegistryEntry;
-
-    const balances = (Array.isArray(input.balances) ? input.balances : [])
-        .map(normalizeTokenBalance)
-        .filter(Boolean);
-
-    const next: WatchOnlyRegistryEntry = {
-        ...existing,
-        address,
-        pubkey: pubkey || existing.pubkey,
-        source: existing.source || 'snapshot',
-        lastSeenAt: now,
-        lastTokenSnapshot: {
-            updatedAt: now,
-            scannedHeight: normalizeHeight(input.scannedHeight),
-            scanSourceNodeId: input.scanSourceNodeId || existing.scanSourceNodeId || null,
-            balances,
-        },
-    };
-
-    registry.set(address, next);
-    await persistRegistryEntries(registry).catch((error) => {
-        console.warn('[watchonly-registry] persist skipped after token snapshot:', (error as Error)?.message || error);
     });
     return next;
 }

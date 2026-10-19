@@ -7,7 +7,6 @@ import {
     getWatchOnlyRegistryEntry,
     resolveWatchOnlyPubkey,
     recordTradeLayerRpcSnapshot,
-    recordWatchOnlyTokenSnapshot,
     recordWatchOnlySnapshot,
     upsertWatchOnlyAccounts,
 } from "./watchonly-registry.service";
@@ -563,21 +562,6 @@ export const getAddressBalance = async (address: string) => {
             throw new Error(res.error);
         }
         const balances = Array.isArray(res.data) ? res.data : [];
-        await recordWatchOnlyTokenSnapshot({
-            address: String(address || '').trim(),
-            balances: balances.map((token: any) => ({
-                propertyId: token?.propertyId ?? token?.propertyid ?? token?.id ?? token?.propertyID ?? '',
-                ticker: token?.ticker ?? token?.name ?? token?.label ?? '-',
-                amount: Number(token?.amount || 0),
-                available: Number(token?.available || 0),
-                reserved: Number(token?.reserved || 0),
-                margin: Number(token?.margin || 0),
-                vesting: Number(token?.vesting || 0),
-                channel: Number(token?.channel || 0),
-            })),
-        }).catch((error) => {
-            console.warn('[portfolio-heartbeat][relayer][balance] token-snapshot-cache failed', error instanceof Error ? error.message : error);
-        });
         console.log('[portfolio-heartbeat][relayer][balance] response', {
             address: String(address || '').trim(),
             hasData: res.data != null,
