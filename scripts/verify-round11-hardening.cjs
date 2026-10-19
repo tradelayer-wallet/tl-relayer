@@ -211,8 +211,9 @@ const bodyLimitCases = async (stubPort) => {
 
 // ------------------------------------------------------------------ bug cases
 
-const ADDR = 'LTCprobeaddress000000000000001';
-const PUB = `02${'ab'.repeat(32)}`;
+// A pair the registry accepts: the P2PKH address of the compressed point 1G on LTC (round-19 R2).
+const ADDR = 'LVuDpNCSSj6pQ7t9Pv6d6sUkLKoqDEVUnJ';
+const PUB = '0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798';
 const TXA = 'a'.repeat(64);
 const TXB = 'b'.repeat(64);
 const TXC = 'c'.repeat(64);

@@ -123,11 +123,25 @@ const r2 = async () => {
   await runCase('R2 a pubkey that does not derive the address is refused before any node call', async () => {
     const { file, reg } = freshRegistry('r2-derive');
     const address = p2pkh(P1);
+    const before = importCalls();
     const res = await reg.upsertWatchOnlyAccounts([{ address, pubkey: P2 }], { source: 'sync-watchonly' });
     assert(res.results[0].error, 'a pubkey that does not derive the address was accepted');
     assert(/does not derive/.test(res.results[0].error), `derivation error does not say why: ${res.results[0].error}`);
-    assert(importCalls() === 0, 'an underivable pair reached importpubkey');
+    assert(importCalls() === before, 'an underivable pair reached importpubkey');
     assert(!fs.existsSync(file), 'an underivable pair was written to the registry');
+  });
+
+  await runCase('R2 the snapshot write cannot rebind or create a pair whose pubkey does not derive the address', async () => {
+    const { reg } = freshRegistry('r2-snapshot');
+    await reg.upsertWatchOnlyAccounts([{ address: p2pkh(P1), pubkey: P1 }], { source: 'sync-watchonly' });
+    const rebound = await reg.recordWatchOnlySnapshot({ address: p2pkh(P1), pubkey: P2, utxos: [] });
+    assert(!rebound, 'a snapshot with another pubkey rebound the registered address');
+    const created = await reg.recordWatchOnlySnapshot({ address: p2pkh(P3), pubkey: P2, utxos: [] });
+    assert(!created, 'a snapshot created an entry whose pubkey does not derive the address');
+    assert(await reg.resolveWatchOnlyPubkey(p2pkh(P1)) === P1, 'the stored pubkey changed');
+    assert((await reg.listWatchOnlyEntries()).length === 1, 'an underivable entry was created');
+    const honest = await reg.recordWatchOnlySnapshot({ address: p2pkh(P2), pubkey: P2, utxos: [] });
+    assert(honest && honest.pubkey === P2, 'an honest snapshot was refused');
   });
 
   await runCase('R2 honest single-key addresses import: P2PKH (compressed and uncompressed), P2WPKH, P2SH-P2WPKH', async () => {

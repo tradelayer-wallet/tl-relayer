@@ -1,8 +1,10 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { randomBytes } from 'node:crypto';
+import * as bitcoin from 'bitcoinjs-lib';
 
 import { envConfig } from '../config/env.config';
+import { networks } from '../config/networks';
 import { OUTBOUND_LIMITS, validateBootstrapSourceUrl } from './security-utils.service';
 import { utxoSetDigest } from './utxo-digest.service';
 import { OUTBOUND_TIMEOUT_MS, outboundCall } from './outbound.service';
@@ -324,6 +326,36 @@ function normalizeAccount(account: Partial<WatchOnlyAccount> | null | undefined)
     return { address, pubkey };
 }
 
+// A single pubkey controls the wallet forms the browser wallets use: P2PKH (compressed or not), and for a
+// compressed key also P2WPKH and P2SH-P2WPKH. The stored address must be one of them on the configured network.
+function pubkeyDerivesAddress(address: string, pubkey: string): boolean {
+    const network = networks[envConfig.NETWORK];
+    if (!network || !/^(?:0[23][0-9a-f]{64}|04[0-9a-f]{128})$/i.test(pubkey)) return false;
+    try {
+        const key = Buffer.from(pubkey, 'hex');
+        const candidates = [bitcoin.payments.p2pkh({ pubkey: key, network }).address];
+        if (key.length === 33) {
+            const segwit = bitcoin.payments.p2wpkh({ pubkey: key, network });
+            candidates.push(segwit.address, bitcoin.payments.p2sh({ redeem: segwit, network }).address);
+        }
+        return candidates.includes(address);
+    } catch {
+        return false;
+    }
+}
+
+// Every write to the registry goes through this check. An address keeps the one pubkey it was registered
+// with, and a pubkey is stored only if it derives that address.
+function registrationError(existing: WatchOnlyRegistryEntry | undefined, account: WatchOnlyAccount): string | null {
+    if (existing && existing.pubkey !== account.pubkey) {
+        return `address ${account.address} is already registered with a different pubkey`;
+    }
+    if (!pubkeyDerivesAddress(account.address, account.pubkey)) {
+        return `pubkey does not derive address ${account.address} on ${envConfig.NETWORK}`;
+    }
+    return null;
+}
+
 function toEntry(raw: any): WatchOnlyRegistryEntry | null {
     const account = normalizeAccount(raw);
     if (!account) return null;
@@ -507,6 +539,20 @@ async function upsertWatchOnlyRegistryEntries(
         }
 
         const existing = registry.get(entry.address);
+        const refusal = registrationError(existing, entry);
+        if (refusal) {
+            failed += 1;
+            results.push({
+                address: entry.address,
+                pubkey: entry.pubkey,
+                imported: false,
+                refreshed: false,
+                skipped: false,
+                updated: false,
+                error: refusal,
+            });
+            continue;
+        }
         const merged: WatchOnlyRegistryEntry = {
             ...(existing || entry),
             ...entry,
@@ -678,6 +724,18 @@ async function importWatchOnlyAccount(
     const entries = await getRegistryEntries();
     const now = Date.now();
     const existing = entries.get(normalized.address);
+    const refusal = registrationError(existing, normalized);
+    if (refusal) {
+        return {
+            address: normalized.address,
+            pubkey: normalized.pubkey,
+            imported: false,
+            refreshed: false,
+            skipped: false,
+            updated: false,
+            error: refusal,
+        };
+    }
     const samePubkey = existing?.pubkey === normalized.pubkey;
     const refreshRequested = !!options?.refresh;
     const registryMatched = !!existing && samePubkey;
@@ -1024,7 +1082,7 @@ export async function recordWatchOnlySnapshot(input: {
     const address = normalize(input.address);
     const network = normalize(input.network || envConfig.NETWORK || '').toLowerCase();
     const pubkey = normalize(input.pubkey || '');
-    if (!address || !pubkey) {
+    if (!address || !pubkey || registrationError(registry.get(address), { address, pubkey })) {
         return null;
     }
 

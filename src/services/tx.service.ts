@@ -1,4 +1,5 @@
 import * as bitcoin from 'bitcoinjs-lib';
+import { networks } from '../config/networks';
 import { OUTBOUND_TIMEOUT_MS, outboundCall } from './outbound.service';
 import { rpcClient } from "../config/rpc.config";  // Your configured RPC client
 import { getWatchOnlyRegistryEntry } from './watchonly-registry.service';
@@ -15,59 +16,6 @@ export interface IUTXO {
   vout: number;
   redeemScript?: string;
   pubkey?: string;
-};
-
-import { Network } from 'bitcoinjs-lib';
-
-export const networks: Record<string, Network> = {
-   BTC: {
-    messagePrefix: '\x18Bitcoin Signed Message:\n',
-    bech32: 'bc',
-    bip32: {
-      public: 0x0488b21e,
-      private: 0x0488ade4,
-    },
-    pubKeyHash: 0x00,
-    scriptHash: 0x05,
-    wif: 0x80,
-  },
-
-  // -----------------------------
-  // BITCOIN TESTNET / SIGNET
-  // -----------------------------
-  BTCTEST: {
-    messagePrefix: '\x18Bitcoin Signed Message:\n',
-    bech32: 'tb',
-    bip32: {
-      public: 0x043587cf,
-      private: 0x04358394,
-    },
-    pubKeyHash: 0x6f,
-    scriptHash: 0xc4,
-    wif: 0xef,
-  },
-  LTC: {
-    messagePrefix: '\x19Litecoin Signed Message:\n',
-    bip32: {
-      public: 0x019da462,
-      private: 0x019d9cfe,
-    },
-    pubKeyHash: 0x30,
-    scriptHash: 0x32,
-    wif: 0xb0,
-    bech32: 'ltc', // Add this
-  },
-  LTCTEST: {
-    messagePrefix: '\x19Litecoin Signed Message:\n',
-    bip32: {
-      public: 0x043587cf,
-      private: 0x04358394,
-    },
-    pubKeyHash: 0x6f,
-    scriptHash: 0x3a,
-    wif: 0xef,
-    bech32: 'tltc', // Add this
-  },
 };
 
 export interface IBuildTxConfig {
