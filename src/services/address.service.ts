@@ -9,6 +9,7 @@ import {
     recordTradeLayerRpcSnapshot,
     recordWatchOnlySnapshot,
     upsertWatchOnlyAccounts,
+    watchOnlyRegistrationError,
 } from "./watchonly-registry.service";
 
 export type WatchOnlyAccount = {
@@ -609,6 +610,8 @@ export const importPubKey = async (_server: any, params: any[]): Promise<{ data?
 
         const normalizedAddress = String(address || '').trim();
         const normalizedPubkey = String(pubkey || '').trim();
+        const refusal = await watchOnlyRegistrationError({ address: normalizedAddress, pubkey: normalizedPubkey });
+        if (refusal) throw new Error(refusal);
         const providerNodeId = await resolveWatchOnlyProviderNodeId(normalizedAddress);
         const allocatedRes = await callAllocatedRpc('tl_watchonly_register', [{
             address: normalizedAddress,

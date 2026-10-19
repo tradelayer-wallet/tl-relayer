@@ -15,7 +15,7 @@ const os = require('os');
 const path = require('path');
 const bitcoin = require('bitcoinjs-lib');
 const h = require('./lib/probe-harness.cjs');
-const { results, assert, runCase, loadSource } = h;
+const { results, assert, runCase, loadSource, startRelayer, startProviderStub, httpRequest } = h;
 
 const LTC_NET = {
   messagePrefix: '\x19Litecoin Signed Message:\n',
@@ -106,6 +106,8 @@ const freshRegistry = (name) => {
 const freshAddressService = () => loadSource(ADDRESS_REL);
 
 const importCalls = () => stub.current.calls.filter((m) => m === 'importpubkey').length;
+// Every node-side registration: the registry's importpubkey and the relayer's tl_watchonly_register.
+const nodeRegisterCalls = () => stub.current.calls.filter((m) => m === 'importpubkey' || m === 'tl_watchonly_register').length;
 
 // ------------------------------------------------------------ R2: pubkey must derive the address; no rebinding
 
@@ -315,6 +317,92 @@ const r5 = async () => {
   });
 };
 
+// ------------------------------------------------------------ built server, end to end
+
+const e2e = async () => {
+  const provider = await startProviderStub();
+  const dir = fs.mkdtempSync(path.join(TEMP_DIR, 'e2e-'));
+  const file = path.join(dir, 'registry.json');
+  const env = {
+    NETWORK: 'LTC',
+    WATCHONLY_REGISTRY_PATH: file,
+    TL_COLLATOR_URL: stub.current.url,
+    COLLATOR_URL: stub.current.url,
+  };
+
+  const srv = await startRelayer(env, provider.port);
+  try {
+    assert(srv.started, 'relayer did not start');
+
+    await runCase('E2E built server: an honest pair syncs, and a rebind is refused before any node registration', async () => {
+      const first = await httpRequest(srv.port, {
+        method: 'POST',
+        target: '/address/sync-watchonly',
+        body: { accounts: [{ address: p2pkh(P1), pubkey: P1 }] },
+      });
+      assert(first.status === 200 && first.json && first.json.failed === 0, `honest sync: ${first.status} ${first.text.slice(0, 200)}`);
+      assert(first.json.snapshot.entries.some((e) => e.address === p2pkh(P1) && e.pubkey === P1), 'the honest pair is not in the registry');
+      const before = nodeRegisterCalls();
+      const rebind = await httpRequest(srv.port, {
+        method: 'POST',
+        target: '/address/sync-watchonly',
+        body: { accounts: [{ address: p2pkh(P1), pubkey: P2 }] },
+      });
+      assert(rebind.json && rebind.json.failed === 1 && /different pubkey/.test(rebind.text), `rebind not refused: ${rebind.status} ${rebind.text.slice(0, 200)}`);
+      assert(nodeRegisterCalls() === before, 'the rebind reached the node');
+    });
+
+    await runCase('E2E built server: the public RPC passthrough refuses a pair that does not derive, and forwards an honest one', async () => {
+      const before = nodeRegisterCalls();
+      const bad = await httpRequest(srv.port, {
+        method: 'POST',
+        target: '/rpc/tl_watchonly_register',
+        body: { params: [{ address: p2pkh(P1), pubkey: P2 }] },
+      });
+      assert(bad.status === 400 && /different pubkey/.test(bad.text), `passthrough not refused: ${bad.status} ${bad.text.slice(0, 200)}`);
+      assert(nodeRegisterCalls() === before, 'a refused passthrough reached the node');
+      const good = await httpRequest(srv.port, {
+        method: 'POST',
+        target: '/rpc/tl_watchonly_register',
+        body: { params: [{ address: p2pkh(P3), pubkey: P3 }] },
+      });
+      assert(good.status === 200, `honest passthrough: ${good.status} ${good.text.slice(0, 200)}`);
+      assert(nodeRegisterCalls() === before + 1, 'an honest passthrough did not reach the node once');
+    });
+
+    await runCase('E2E built server: a balance read of a fresh address leaves the registry file unchanged', async () => {
+      const before = fs.readFileSync(file);
+      const res = await httpRequest(srv.port, { target: `/address/balance/${p2pkh(P3)}` });
+      assert(res.status === 200, `balance read status ${res.status}`);
+      assert(Buffer.compare(fs.readFileSync(file), before) === 0, 'the balance read rewrote the registry file');
+    });
+  } finally {
+    await srv.stop();
+  }
+
+  const good = fs.readFileSync(file);
+  fs.writeFileSync(file, good.subarray(0, Math.floor(good.length / 2)));
+  const damaged = fs.readFileSync(file);
+  const srv2 = await startRelayer(env, provider.port);
+  try {
+    assert(srv2.started, 'relayer did not start over a damaged registry');
+    await runCase('E2E built server: a damaged registry refuses the listing and a sync, names the file, and keeps its bytes', async () => {
+      const listing = await httpRequest(srv2.port, { target: '/address/watchonly' });
+      assert(listing.status >= 400 && listing.text.includes(file), `listing over a damaged file: ${listing.status} ${listing.text.slice(0, 200)}`);
+      const sync = await httpRequest(srv2.port, {
+        method: 'POST',
+        target: '/address/sync-watchonly',
+        body: { accounts: [{ address: p2pkh(P4), pubkey: P4 }] },
+      });
+      assert(sync.text.includes(file) || (sync.json && sync.json.failed === 1), `sync over a damaged file: ${sync.status} ${sync.text.slice(0, 200)}`);
+      assert(Buffer.compare(fs.readFileSync(file), damaged) === 0, 'the damaged registry file was replaced');
+    });
+  } finally {
+    await srv2.stop();
+    provider.server.close();
+  }
+};
+
 const main = async () => {
   stub.current = await startCollatorStub();
   envConfig.COLLATOR_URL = stub.current.url;
@@ -322,6 +410,7 @@ const main = async () => {
   await r3();
   await r4();
   await r5();
+  await e2e();
   stub.current.server.close();
   fs.rmSync(TEMP_DIR, { recursive: true, force: true });
   console.log(`\n${results.passed} passed, ${results.failed.length} failed`);

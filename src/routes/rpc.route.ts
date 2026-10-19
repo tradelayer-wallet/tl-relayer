@@ -1,6 +1,6 @@
 import { FastifyInstance } from "fastify";
 import { callAllocatedRpc, callRpc } from "../services/address.service";
-import { recordTradeLayerRpcSnapshot } from "../services/watchonly-registry.service";
+import { recordTradeLayerRpcSnapshot, watchOnlyRegistrationError } from "../services/watchonly-registry.service";
 import { Encode } from "../services/txEncoder";
 
 const PUBLIC_RPC_METHODS = new Set([
@@ -350,6 +350,18 @@ logPortfolioHeartbeat('incoming', {
       params = [request.query.address.trim()];
     }
     const raw = params[0];
+
+    if (normalizedMethod === 'tl_watchonly_register') {
+      const account = raw && typeof raw === 'object' ? raw : {};
+      const refusal = await watchOnlyRegistrationError({
+        address: String(account.address || ''),
+        pubkey: String(account.pubkey || account.pubKey || ''),
+      });
+      if (refusal) {
+        sendRpcError(reply, 400, 'WATCHONLY_REGISTRATION_REFUSED', refusal);
+        return;
+      }
+    }
 
     if (
       normalizedMethod === 'tl_getallbalancesforaddress' ||

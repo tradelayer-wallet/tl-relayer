@@ -903,6 +903,14 @@ async function importWatchOnlyAccount(
     }
 }
 
+// For callers that register a pair with a node: the refusal reason, or null when the pair may be registered.
+export async function watchOnlyRegistrationError(account: WatchOnlyAccount): Promise<string | null> {
+    const normalized = normalizeAccount(account);
+    if (!normalized) return 'Invalid watch-only account';
+    const entries = await getRegistryEntries();
+    return registrationError(entries.get(normalized.address), normalized);
+}
+
 export async function resolveWatchOnlyPubkey(address: string): Promise<string | undefined> {
     const entries = await getRegistryEntries();
     return entries.get(normalize(address))?.pubkey;
