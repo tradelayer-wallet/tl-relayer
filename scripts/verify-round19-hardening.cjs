@@ -88,15 +88,19 @@ const stub = { current: null };
 
 // Each case gets its own registry file and its own module instances, so no in-memory cache leaks between
 // cases. Modules that import the registry are reloaded after it.
+// A registry module instance loads its file on first use, like a process starting up.
+const reopenRegistry = (file) => {
+  envConfig.WATCHONLY_REGISTRY_PATH = file;
+  envConfig.NETWORK = 'LTC';
+  for (const rel of CHAIN_MODULES) delete require.cache[path.join(h.ROOT, rel)];
+  return loadSource(REGISTRY_REL);
+};
+
 const freshRegistry = (name) => {
   const dir = path.join(TEMP_DIR, name);
   fs.mkdirSync(dir, { recursive: true });
   const file = path.join(dir, 'watchonly-registry.json');
-  envConfig.WATCHONLY_REGISTRY_PATH = file;
-  envConfig.NETWORK = 'LTC';
-  for (const rel of CHAIN_MODULES) delete require.cache[path.join(h.ROOT, rel)];
-  const reg = loadSource(REGISTRY_REL);
-  return { file, dir, reg };
+  return { file, dir, reg: reopenRegistry(file) };
 };
 
 const freshAddressService = () => loadSource(ADDRESS_REL);
@@ -182,17 +186,19 @@ const r3 = async () => {
   const extra = { address: p2pkh(P4), pubkey: P4 };
 
   await runCase('R3 a truncated registry file refuses writes, names the file, and is left untouched', async () => {
-    const { file, reg } = await seed('r3-truncated');
+    const { file } = await seed('r3-truncated');
     const good = fs.readFileSync(file);
     fs.writeFileSync(file, good.subarray(0, Math.floor(good.length * 0.6)));
     const damaged = fs.readFileSync(file);
+    const reg = reopenRegistry(file);
     await expectRefusal(reg.upsertWatchOnlyAccounts([extra], { source: 'sync-watchonly' }), new RegExp(file.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
     assert(Buffer.compare(readOrNull(file), damaged) === 0, 'the damaged registry file was replaced');
   });
 
   await runCase('R3 an empty registry file refuses writes and is left untouched', async () => {
-    const { file, reg } = await seed('r3-empty');
+    const { file } = await seed('r3-empty');
     fs.writeFileSync(file, '');
+    const reg = reopenRegistry(file);
     await expectRefusal(reg.upsertWatchOnlyAccounts([extra], { source: 'sync-watchonly' }), /r3-empty/);
     assert(fs.readFileSync(file).length === 0, 'the empty registry file was replaced');
   });
@@ -234,9 +240,10 @@ const r3 = async () => {
   });
 
   await runCase('R3 after the file is repaired the next write goes through (no cached failure)', async () => {
-    const { file, reg } = await seed('r3-repair');
+    const { file } = await seed('r3-repair');
     const good = fs.readFileSync(file);
     fs.writeFileSync(file, good.subarray(0, 10));
+    const reg = reopenRegistry(file);
     await expectRefusal(reg.upsertWatchOnlyAccounts([extra], { source: 'sync-watchonly' }), /cannot be read/);
     fs.writeFileSync(file, good);
     const res = await reg.upsertWatchOnlyAccounts([extra], { source: 'sync-watchonly' });

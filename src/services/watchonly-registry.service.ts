@@ -434,39 +434,44 @@ function snapshotFromEntries(entries: Map<string, WatchOnlyRegistryEntry>): Watc
     };
 }
 
+// A registry file that exists but cannot be read is the source of truth in doubt: treating it as empty would let
+// the next write replace it. Reads and writes are refused until the file is repaired.
+function registryUnreadable(registryPath: string, reason: unknown): Error {
+    const detail = (reason as Error)?.message || String(reason);
+    return new Error(`watch-only registry ${registryPath} cannot be read (${detail}); refusing to read or write it. Repair the file, or restore registry.json.bak (the generation before the last write).`);
+}
+
 async function loadRegistryFromDisk(): Promise<Map<string, WatchOnlyRegistryEntry>> {
     const registryPath = getRegistryPath();
-    try {
-        if (!fs.existsSync(registryPath)) {
-            return new Map();
-        }
-
-        const raw = await fs.promises.readFile(registryPath, 'utf8');
-        if (!raw.trim()) {
-            return new Map();
-        }
-
-        const parsed = JSON.parse(raw);
-        const sourceEntries = Array.isArray(parsed)
-            ? parsed
-            : Array.isArray(parsed?.entries)
-                ? parsed.entries
-                : Array.isArray(parsed?.accounts)
-                    ? parsed.accounts
-                    : [];
-
-        const entries = new Map<string, WatchOnlyRegistryEntry>();
-        for (const item of sourceEntries) {
-            const entry = toEntry(item);
-            if (!entry) continue;
-            entries.set(entry.address, entry);
-        }
-        tradeLayerStateCache = normalizeTradeLayerStateSnapshot(parsed?.tradeLayerState);
-        return entries;
-    } catch (error) {
-        console.warn(`[watchonly-registry] Failed to load ${registryPath}:`, (error as Error)?.message || error);
+    if (!fs.existsSync(registryPath)) {
         return new Map();
     }
+
+    let parsed: any;
+    try {
+        parsed = JSON.parse(await fs.promises.readFile(registryPath, 'utf8'));
+    } catch (error) {
+        throw registryUnreadable(registryPath, error);
+    }
+    const sourceEntries = Array.isArray(parsed)
+        ? parsed
+        : Array.isArray(parsed?.entries)
+            ? parsed.entries
+            : Array.isArray(parsed?.accounts)
+                ? parsed.accounts
+                : null;
+    if (!sourceEntries) {
+        throw registryUnreadable(registryPath, 'no entries array');
+    }
+
+    const entries = new Map<string, WatchOnlyRegistryEntry>();
+    for (const item of sourceEntries) {
+        const entry = toEntry(item);
+        if (!entry) continue;
+        entries.set(entry.address, entry);
+    }
+    tradeLayerStateCache = normalizeTradeLayerStateSnapshot(parsed?.tradeLayerState);
+    return entries;
 }
 
 async function getRegistryEntries(): Promise<Map<string, WatchOnlyRegistryEntry>> {
@@ -484,25 +489,41 @@ async function getRegistryEntries(): Promise<Map<string, WatchOnlyRegistryEntry>
     return registryLoadPromise;
 }
 
+async function syncDirectory(dir: string): Promise<void> {
+    // Makes the rename durable. Not every platform can open a directory for sync.
+    const handle = await fs.promises.open(dir, 'r').catch(() => null);
+    if (!handle) return;
+    try {
+        await handle.sync();
+    } catch {
+        // ignored: the rename already happened
+    } finally {
+        await handle.close();
+    }
+}
+
+// Write a temp file, fsync it, keep the previous file as registry.json.bak, then rename over the registry.
+// The registry path is never truncated or partly written.
 async function persistRegistryEntries(entries: Map<string, WatchOnlyRegistryEntry>): Promise<void> {
     const registryPath = getRegistryPath();
-    const snapshot = snapshotFromEntries(entries);
+    const body = `${JSON.stringify(snapshotFromEntries(entries), null, 2)}\n`;
     const dir = path.dirname(registryPath);
     await fs.promises.mkdir(dir, { recursive: true });
 
     const tmpPath = `${registryPath}.${process.pid}.${Date.now()}.${randomBytes(4).toString('hex')}.tmp`;
     try {
-        await fs.promises.writeFile(tmpPath, `${JSON.stringify(snapshot, null, 2)}\n`, 'utf8');
+        const handle = await fs.promises.open(tmpPath, 'wx');
         try {
-            await fs.promises.rename(tmpPath, registryPath);
-        } catch (renameError: any) {
-            const message = String(renameError?.message || renameError || '').toLowerCase();
-            if (message.includes('enoent')) {
-                await fs.promises.writeFile(registryPath, `${JSON.stringify(snapshot, null, 2)}\n`, 'utf8');
-            } else {
-                throw renameError;
-            }
+            await handle.writeFile(body, 'utf8');
+            await handle.sync();
+        } finally {
+            await handle.close();
         }
+        if (fs.existsSync(registryPath)) {
+            await fs.promises.copyFile(registryPath, `${registryPath}.bak`);
+        }
+        await fs.promises.rename(tmpPath, registryPath);
+        await syncDirectory(dir);
         registryCache = entries;
     } finally {
         await fs.promises.unlink(tmpPath).catch(() => undefined);
