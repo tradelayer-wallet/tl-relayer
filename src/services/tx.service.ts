@@ -1,5 +1,6 @@
 import * as bitcoin from 'bitcoinjs-lib';
-import axios from 'axios';
+import { networks } from '../config/networks';
+import { OUTBOUND_TIMEOUT_MS, outboundCall } from './outbound.service';
 import { rpcClient } from "../config/rpc.config";  // Your configured RPC client
 import { getWatchOnlyRegistryEntry } from './watchonly-registry.service';
 import { callAllocatedRpc, callRpc } from './address.service';
@@ -15,59 +16,6 @@ export interface IUTXO {
   vout: number;
   redeemScript?: string;
   pubkey?: string;
-};
-
-import { Network } from 'bitcoinjs-lib';
-
-export const networks: Record<string, Network> = {
-   BTC: {
-    messagePrefix: '\x18Bitcoin Signed Message:\n',
-    bech32: 'bc',
-    bip32: {
-      public: 0x0488b21e,
-      private: 0x0488ade4,
-    },
-    pubKeyHash: 0x00,
-    scriptHash: 0x05,
-    wif: 0x80,
-  },
-
-  // -----------------------------
-  // BITCOIN TESTNET / SIGNET
-  // -----------------------------
-  BTCTEST: {
-    messagePrefix: '\x18Bitcoin Signed Message:\n',
-    bech32: 'tb',
-    bip32: {
-      public: 0x043587cf,
-      private: 0x04358394,
-    },
-    pubKeyHash: 0x6f,
-    scriptHash: 0xc4,
-    wif: 0xef,
-  },
-  LTC: {
-    messagePrefix: '\x19Litecoin Signed Message:\n',
-    bip32: {
-      public: 0x019da462,
-      private: 0x019d9cfe,
-    },
-    pubKeyHash: 0x30,
-    scriptHash: 0x32,
-    wif: 0xb0,
-    bech32: 'ltc', // Add this
-  },
-  LTCTEST: {
-    messagePrefix: '\x19Litecoin Signed Message:\n',
-    bip32: {
-      public: 0x043587cf,
-      private: 0x04358394,
-    },
-    pubKeyHash: 0x6f,
-    scriptHash: 0x3a,
-    wif: 0xef,
-    bech32: 'tltc', // Add this
-  },
 };
 
 export interface IBuildTxConfig {
@@ -238,7 +186,7 @@ export const smartRpc: TClient = async (
     if (relayerApiUrl) {
       const url = `${relayerApiUrl}/rpc/${method}`;
       try {
-        const res = await axios.post(url, { params });
+        const res = await outboundCall({ method: 'POST', url, data: { params }, timeoutMs: OUTBOUND_TIMEOUT_MS });
         return res.data;
       } catch (error: any) {
         if (normalizedMethod === 'listunspent') {
@@ -318,6 +266,10 @@ export function computeMultisigData(
 
 
 /** Safe number helper, to avoid float issues. Customize as needed. */
+const SATS_PER_COIN = 1e8;
+// Change smaller than this is not worth an output; it stays in the fee.
+const CHANGE_DUST_SATS = 10_000;
+
 export const safeNumber = (value: number, decimals = 8): number => {
   return parseFloat(value.toFixed(decimals));
 };
@@ -469,10 +421,24 @@ export const buildTx = async (txConfig: IBuildTxConfig, isApiMode: boolean) => {
       throw new Error('Not enough inputs to cover the amount + fee');
     }
 
+    // The recipient gets `amount` less the fee. Inputs beyond `amount` (a large UTXO picked largest-first)
+    // come back to the sender as change: without it every satoshi above `amount` goes to the miners.
+    // Change under the dust floor is left to the fee, which bounds what a rounding remainder can cost.
     const sendAmountBtc = safeNumber(amount! - fee);
+    const inputSats = finalInputs.reduce((sum, inp) => sum + Math.round(inp.amount * SATS_PER_COIN), 0);
+    const changeSats = inputSats - Math.round(amount! * SATS_PER_COIN);
     const outputs: Record<string, number| string> = {
-      [toAddress]: sendAmountBtc, 
+      [toAddress]: sendAmountBtc,
     };
+    if (changeSats >= CHANGE_DUST_SATS) {
+      const changeBtc = changeSats / SATS_PER_COIN;
+      outputs[fromAddress] = toAddress === fromAddress ? safeNumber(sendAmountBtc + changeBtc) : changeBtc;
+    }
+    const paidSats = Object.values(outputs).reduce<number>((sum, v) => sum + Math.round(Number(v) * SATS_PER_COIN), 0);
+    const impliedFeeSats = inputSats - paidSats;
+    if (impliedFeeSats > Math.round(fee * SATS_PER_COIN) + CHANGE_DUST_SATS) {
+      throw new Error(`Refusing to build a transaction that pays ${impliedFeeSats} satoshis in fee`);
+    }
 
     const psbtInputs = finalInputs.map(inp => ({
       txid: inp.txid,
@@ -530,7 +496,7 @@ export const buildLTCTradeTx = async (txConfig: IBuildLTCITTxConfig, isApiMode: 
 
     // Exclude `commitUTXOs` from normal selection
     const normalUTXOs = luRes.data.filter(
-      (utxo: IUTXO) => !commitUTXOs.some((cUtxo: IUTXO) => cUtxo.txid === utxo.txid && cUtxo.vout === cUtxo.vout)
+      (utxo: IUTXO) => !commitUTXOs.some((cUtxo: IUTXO) => cUtxo.txid === utxo.txid && cUtxo.vout === utxo.vout)
     );
 
     // Select additional inputs

@@ -6,6 +6,10 @@ export enum ELogType {
     TXIDS = 'TXIDS',
 };
 
+/** Message for a caught value. Error objects from HTTP clients carry request config, so only the message is used. */
+export const errorMessageOf = (error: unknown): string =>
+    error instanceof Error ? error.message : 'An unexpected error occurred';
+
 export const saveLog = (type: ELogType, data: string) => {
     try {
         const time = Date.now();

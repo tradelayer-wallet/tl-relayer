@@ -8,9 +8,9 @@ import {
     buildLTCTradeTx,
     IBuildTxConfig,
     IBuildLTCITTxConfig,
-    computeMultisigData,
-    networks
+    computeMultisigData
 } from "../services/tx.service";
+import { networks } from "../config/networks";
 
 type MultisigBody = {
     m: number;

@@ -1,6 +1,9 @@
 import { FastifyInstance, FastifyRequest } from "fastify";
 import { fundAddress, getAddressBalance, importWatchOnlyAccounts, validateAddress } from "../services/address.service";
 import { listunspent, rescanWatchOnlyAccounts, verifyWatchOnlyAccountCoverage } from "../services/sochain.service"; // Import the new function
+import { envConfig } from "../config/env.config";
+import { FAUCET_KEY_HEADERS, headerCredentialMatches, scrubSensitiveQuery, validateBootstrapSourceUrl } from "../services/security-utils.service";
+import { errorMessageOf } from "../services/utils.service";
 import {
     bootstrapWatchOnlyRegistryFromSeed,
     getWatchOnlyCoverage,
@@ -16,7 +19,8 @@ function getRequestTrace(request: FastifyRequest<any>, route: string): Record<st
         route,
         traceId: String((headers['x-request-id'] as string) || (headers['x-correlation-id'] as string) || '').trim() || null,
         origin: String((headers.origin as string) || '').trim() || null,
-        referer: String((headers.referer as string) || '').trim() || null,
+        // A referer is the caller's page URL and may carry ?apiKey=; redact it like the request URL.
+        referer: scrubSensitiveQuery(String((headers.referer as string) || '').trim(), 'redact') || null,
         userAgent: String((headers['user-agent'] as string) || '').trim() || null,
         contentType: String((headers['content-type'] as string) || '').trim() || null,
     };
@@ -29,7 +33,7 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
             const res = await validateAddress(address);
             reply.send(res);
         } catch (error: unknown) {
-            const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+            const errorMessage = errorMessageOf(error);
             reply.status(500).send({ error: errorMessage });
         }
     });
@@ -52,18 +56,33 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
             });
             reply.send(res);
         } catch (error: unknown) {
-            const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+            const errorMessage = errorMessageOf(error);
             reply.status(500).send({ error: errorMessage });
         }
     });
 
+    // HEAD is not exposed for any route: see exposeHeadRoutes in src/index.ts (round 6 / F-A2,
+    // round 7 / F-B5). This handler moves funds and must never run for a HEAD request.
     fastify.get('/faucet/:address', async (request: FastifyRequest<{ Params: { address: string } }>, reply) => {
         try {
+            // Issue #1 / C1: the faucet moves real funds out of the node wallet.
+            // Fail closed: disabled unless FAUCET_ENABLED=true explicitly opts in.
+            if (!envConfig.FAUCET_ENABLED) {
+                reply.status(403).send({ error: 'Faucet is disabled. Set FAUCET_ENABLED=true to enable it.' });
+                return;
+            }
+            // Fail closed: ADMIN_API_KEY must match in x-admin-api-key or x-api-key,
+            // the same rule the API-key hook applies. (Startup also refuses to run
+            // with FAUCET_ENABLED and no ADMIN_API_KEY.)
+            if (!headerCredentialMatches(request.headers, FAUCET_KEY_HEADERS, envConfig.ADMIN_API_KEY)) {
+                reply.status(403).send({ error: 'Forbidden' });
+                return;
+            }
             const { address } = request.params;
             const res = await fundAddress(address);
             reply.send(res);
         } catch (error: unknown) {
-            const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+            const errorMessage = errorMessageOf(error);
             reply.status(500).send({ error: errorMessage });
         }
     });
@@ -110,8 +129,7 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
                     reply.send(res.data);
                 }
             } catch (error: unknown) {
-                const errorMessage =
-                    error instanceof Error ? error.message : "An unexpected error occurred";
+                const errorMessage = errorMessageOf(error);
                 reply.status(500).send({ error: errorMessage });
             }
         }
@@ -140,8 +158,7 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
                     entries,
                 });
             } catch (error: unknown) {
-                const errorMessage =
-                    error instanceof Error ? error.message : "An unexpected error occurred";
+                const errorMessage = errorMessageOf(error);
                 reply.status(500).send({ error: errorMessage });
             }
         }
@@ -171,8 +188,7 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
                     entry: entries[0] || null,
                 });
             } catch (error: unknown) {
-                const errorMessage =
-                    error instanceof Error ? error.message : "An unexpected error occurred";
+                const errorMessage = errorMessageOf(error);
                 reply.status(500).send({ error: errorMessage });
             }
         }
@@ -198,8 +214,7 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
                     coverage,
                 });
             } catch (error: unknown) {
-                const errorMessage =
-                    error instanceof Error ? error.message : "An unexpected error occurred";
+                const errorMessage = errorMessageOf(error);
                 reply.status(500).send({ error: errorMessage });
             }
         }
@@ -219,22 +234,36 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
         ) => {
             try {
                 const body = request.body || {};
+                // Issue #1 / C2 (SSRF): the seed URL must never come from the request
+                // body. It is taken only from the environment and validated below.
+                if (body.sourceUrl) {
+                    console.warn(
+                        '[security] /address/watchonly/bootstrap: ignoring client-supplied sourceUrl; configure WATCHONLY_BOOTSTRAP_URL instead',
+                    );
+                }
+                const validated = validateBootstrapSourceUrl(
+                    envConfig.WATCHONLY_BOOTSTRAP_URL || envConfig.WATCHONLY_REGISTRY_SEED_URL,
+                    envConfig.ALLOW_INSECURE_BOOTSTRAP,
+                );
+                if (!validated.ok) {
+                    reply.status(400).send({ error: validated.error });
+                    return;
+                }
                 console.log('[portfolio-heartbeat][relayer][route] /address/watchonly/bootstrap request', {
                     ...getRequestTrace(request, '/address/watchonly/bootstrap'),
-                    sourceUrl: body.sourceUrl || null,
+                    sourceUrl: validated.sourceUrl || null,
                     network: body.network || null,
                     force: !!body.force,
                 });
                 const res = await bootstrapWatchOnlyRegistryFromSeed({
-                    sourceUrl: body.sourceUrl,
+                    sourceUrl: validated.sourceUrl || undefined,
                     network: body.network,
                     force: !!body.force,
                 });
 
                 reply.send({ ok: true, ...res });
             } catch (error: unknown) {
-                const errorMessage =
-                    error instanceof Error ? error.message : "An unexpected error occurred";
+                const errorMessage = errorMessageOf(error);
                 reply.status(500).send({ error: errorMessage });
             }
         }
@@ -260,8 +289,7 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
                 const report = await verifyWatchOnlyAccountCoverage(address, network);
                 reply.send({ ok: true, report });
             } catch (error: unknown) {
-                const errorMessage =
-                    error instanceof Error ? error.message : "An unexpected error occurred";
+                const errorMessage = errorMessageOf(error);
                 reply.status(500).send({ error: errorMessage });
             }
         }
@@ -286,6 +314,13 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
         ) => {
             try {
                 const body = request.body || {};
+                if (body.force) {
+                    // Issue #1 / C1: `force` is accepted for compatibility but no longer
+                    // bypasses the WATCHONLY_RESCAN_OPT_IN env gate.
+                    console.warn(
+                        '[security] /address/watchonly/scan/run: force:true is ignored; the WATCHONLY_RESCAN_OPT_IN env gate always applies',
+                    );
+                }
                 console.log('[portfolio-heartbeat][relayer][route] /address/watchonly/scan/run request', {
                     ...getRequestTrace(request, '/address/watchonly/scan/run'),
                     network: body.network || null,
@@ -313,8 +348,7 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
                     reply.send(res.data);
                 }
             } catch (error: unknown) {
-                const errorMessage =
-                    error instanceof Error ? error.message : "An unexpected error occurred";
+                const errorMessage = errorMessageOf(error);
                 reply.status(500).send({ error: errorMessage });
             }
         }
@@ -360,8 +394,7 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
 
                 reply.send({ ok: true, entry: snapshot });
             } catch (error: unknown) {
-                const errorMessage =
-                    error instanceof Error ? error.message : "An unexpected error occurred";
+                const errorMessage = errorMessageOf(error);
                 reply.status(500).send({ error: errorMessage });
             }
         }
@@ -407,8 +440,7 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
                 });
                 reply.send({ ok: true, entry: res });
             } catch (error: unknown) {
-                const errorMessage =
-                    error instanceof Error ? error.message : "An unexpected error occurred";
+                const errorMessage = errorMessageOf(error);
                 reply.status(500).send({ error: errorMessage });
             }
         }
@@ -459,8 +491,7 @@ export const addressRoute = (fastify: FastifyInstance, opts: any, done: any) => 
                     reply.send(res.data);
                 }
             } catch (error: unknown) {
-                const errorMessage =
-                    error instanceof Error ? error.message : "An unexpected error occurred";
+                const errorMessage = errorMessageOf(error);
                 reply.status(500).send({ error: errorMessage });
             }
         }

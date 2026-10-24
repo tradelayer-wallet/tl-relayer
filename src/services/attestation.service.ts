@@ -1,5 +1,19 @@
 // src/services/attestation.service.ts
-import axios from 'axios';
+import { AxiosResponse } from 'axios';
+import { isIP } from 'net';
+import { envConfig } from '../config/env.config';
+import { OUTBOUND_LIMITS } from './security-utils.service';
+import { outboundCall } from './outbound.service';
+
+// Reputation providers: a wall-clock deadline, a body cap and no redirects, so the provider
+// key header and the IPinfo token never follow a 3xx. See outbound.service.ts.
+const providerGet = (url: string, headers?: Record<string, string>): Promise<AxiosResponse> =>
+  outboundCall({
+    url,
+    headers,
+    timeoutMs: envConfig.ATTESTATION_PROVIDER_TIMEOUT_MS,
+    maxBytes: OUTBOUND_LIMITS.providerMaxResponseBytes,
+  });
 
 export interface IpAttestationResult {
   success: boolean;
@@ -54,12 +68,27 @@ export class AttestationService {
     process.env.IPINFO_TOKEN || process.env.VPN_IPINFO || '';
 
   private readonly bannedCountries = ['US', 'KP', 'SD', 'RU', 'IR'];
-  private readonly cacheTtlMs = Number(process.env.ATTESTATION_CACHE_TTL_MS || 60 * 60 * 1000);
-  private readonly failureCacheTtlMs = Number(process.env.ATTESTATION_FAILURE_CACHE_TTL_MS || 60 * 1000);
+  private readonly cacheTtlMs = envConfig.ATTESTATION_CACHE_TTL_MS;
+  private readonly failureCacheTtlMs = envConfig.ATTESTATION_FAILURE_CACHE_TTL_MS;
+  // Round 3 / F5: the cache is bounded. Entries are otherwise removed only when
+  // the same IP is looked up again, so distinct client IPs would grow it forever.
   private readonly cache = new Map<string, CachedIpAttestation>();
+  private static readonly MAX_CACHE_ENTRIES = 10_000;
 
   async checkIp(ipAddress: string): Promise<IpAttestationResult> {
     const normalizedIp = this.normalizeIp(ipAddress);
+    // Issue #1 / H3: only well-formed IP addresses may be interpolated into
+    // outbound provider URLs; anything else is rejected before any call is made.
+    if (!isIP(normalizedIp)) {
+      return this.withLegacyAttestation({
+        success: false,
+        ip: normalizedIp,
+        isBlocked: false,
+        source: 'unknown',
+        message: 'Invalid IP address',
+        error: 'Invalid IP address',
+      });
+    }
     const cached = this.getCached(normalizedIp);
     if (cached) return cached;
 
@@ -120,10 +149,12 @@ export class AttestationService {
   }
 
   private async lookupIpInfo(ipAddress: string): Promise<IpInfoLookup | null> {
+    // Issue #1 / H3: never interpolate an unvalidated IP into the outbound URL.
+    if (!isIP(this.normalizeIp(ipAddress))) return null;
     try {
       const tokenQuery = this.IPINFO_TOKEN ? `?token=${this.IPINFO_TOKEN}` : '';
       const url = `https://ipinfo.io/${ipAddress}/json${tokenQuery}`;
-      const resp = await axios.get(url, { timeout: 8000 });
+      const resp = await providerGet(url);
       if (resp.status !== 200 || !resp.data) return null;
 
       const data = resp.data as any;
@@ -142,15 +173,14 @@ export class AttestationService {
 
   private async lookupCriminalIp(ipAddress: string): Promise<CriminalIpLookup | null> {
     if (!this.CRIMINAL_IP_API_KEY) return null;
+    // Issue #1 / H3: never interpolate an unvalidated IP into the outbound URL.
+    if (!isIP(this.normalizeIp(ipAddress))) return null;
 
     try {
       const primaryUrl =
         `https://api.criminalip.io/v1/asset/ip/report?ip=${ipAddress}`;
-      const response = await axios.get(primaryUrl, {
-        headers: {
-          'x-api-key': this.CRIMINAL_IP_API_KEY,
-        },
-        timeout: 8000,
+      const response = await providerGet(primaryUrl, {
+        'x-api-key': this.CRIMINAL_IP_API_KEY,
       });
 
       if (response.status !== 200 || !response.data) return null;
@@ -214,9 +244,11 @@ export class AttestationService {
   }
 
   private async lookupIpApiCountryCode(ipAddress: string): Promise<string | null> {
+    // Issue #1 / H3: never interpolate an unvalidated IP into the outbound URL.
+    if (!isIP(this.normalizeIp(ipAddress))) return null;
     try {
       const url = `http://ip-api.com/json/${ipAddress}?fields=status,countryCode,message`;
-      const resp = await axios.get(url, { timeout: 5000 });
+      const resp = await providerGet(url);
       if (resp.status !== 200 || !resp.data) return null;
       const data = resp.data as any;
       if (data.status && data.status !== 'success') return null;
@@ -245,6 +277,12 @@ export class AttestationService {
   private setCached(ipAddress: string, result: IpAttestationResult): void {
     const ttl = result.success ? this.cacheTtlMs : this.failureCacheTtlMs;
     if (ttl <= 0) return;
+    this.cache.delete(ipAddress);
+    // Full: drop the oldest-inserted entry. Expired entries age out this way too.
+    if (this.cache.size >= AttestationService.MAX_CACHE_ENTRIES) {
+      const oldest = this.cache.keys().next();
+      if (!oldest.done) this.cache.delete(oldest.value);
+    }
     this.cache.set(ipAddress, {
       expiresAt: Date.now() + ttl,
       result,

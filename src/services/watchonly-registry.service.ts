@@ -1,9 +1,13 @@
-import axios from 'axios';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { randomBytes } from 'node:crypto';
+import * as bitcoin from 'bitcoinjs-lib';
 
 import { envConfig } from '../config/env.config';
+import { networks } from '../config/networks';
+import { OUTBOUND_LIMITS, validateBootstrapSourceUrl } from './security-utils.service';
+import { utxoSetDigest } from './utxo-digest.service';
+import { OUTBOUND_TIMEOUT_MS, outboundCall } from './outbound.service';
 import { ELogType, saveLog } from './utils.service';
 
 export interface WatchOnlyAccount {
@@ -196,16 +200,17 @@ async function callRpc(method: string, ...params: any[]): Promise<{ data?: any; 
                 ...summarizePortfolioHeartbeatRpc(method, params),
             });
         }
-        const res = await axios.post(
-            `${url}/rpc/route`,
-            {
+        const res = await outboundCall({
+            method: 'POST',
+            url: `${url}/rpc/route`,
+            data: {
                 service: envConfig.COLLATOR_RPC_SERVICE,
                 network: envConfig.COLLATOR_RPC_NETWORK,
                 method,
                 params,
             },
-            { timeout: 15000 },
-        );
+            timeoutMs: OUTBOUND_TIMEOUT_MS,
+        });
 
         const payload: any = res.data || {};
         if (payload.ok === false) {
@@ -321,6 +326,36 @@ function normalizeAccount(account: Partial<WatchOnlyAccount> | null | undefined)
     return { address, pubkey };
 }
 
+// A single pubkey controls the wallet forms the browser wallets use: P2PKH (compressed or not), and for a
+// compressed key also P2WPKH and P2SH-P2WPKH. The stored address must be one of them on the configured network.
+function pubkeyDerivesAddress(address: string, pubkey: string): boolean {
+    const network = networks[envConfig.NETWORK];
+    if (!network || !/^(?:0[23][0-9a-f]{64}|04[0-9a-f]{128})$/i.test(pubkey)) return false;
+    try {
+        const key = Buffer.from(pubkey, 'hex');
+        const candidates = [bitcoin.payments.p2pkh({ pubkey: key, network }).address];
+        if (key.length === 33) {
+            const segwit = bitcoin.payments.p2wpkh({ pubkey: key, network });
+            candidates.push(segwit.address, bitcoin.payments.p2sh({ redeem: segwit, network }).address);
+        }
+        return candidates.includes(address);
+    } catch {
+        return false;
+    }
+}
+
+// Every write to the registry goes through this check. An address keeps the one pubkey it was registered
+// with, and a pubkey is stored only if it derives that address.
+function registrationError(existing: WatchOnlyRegistryEntry | undefined, account: WatchOnlyAccount): string | null {
+    if (existing && existing.pubkey !== account.pubkey) {
+        return `address ${account.address} is already registered with a different pubkey`;
+    }
+    if (!pubkeyDerivesAddress(account.address, account.pubkey)) {
+        return `pubkey does not derive address ${account.address} on ${envConfig.NETWORK}`;
+    }
+    return null;
+}
+
 function toEntry(raw: any): WatchOnlyRegistryEntry | null {
     const account = normalizeAccount(raw);
     if (!account) return null;
@@ -399,39 +434,44 @@ function snapshotFromEntries(entries: Map<string, WatchOnlyRegistryEntry>): Watc
     };
 }
 
+// A registry file that exists but cannot be read is the source of truth in doubt: treating it as empty would let
+// the next write replace it. Reads and writes are refused until the file is repaired.
+function registryUnreadable(registryPath: string, reason: unknown): Error {
+    const detail = (reason as Error)?.message || String(reason);
+    return new Error(`watch-only registry ${registryPath} cannot be read (${detail}); refusing to read or write it. Repair the file, or restore registry.json.bak (the generation before the last write).`);
+}
+
 async function loadRegistryFromDisk(): Promise<Map<string, WatchOnlyRegistryEntry>> {
     const registryPath = getRegistryPath();
-    try {
-        if (!fs.existsSync(registryPath)) {
-            return new Map();
-        }
-
-        const raw = await fs.promises.readFile(registryPath, 'utf8');
-        if (!raw.trim()) {
-            return new Map();
-        }
-
-        const parsed = JSON.parse(raw);
-        const sourceEntries = Array.isArray(parsed)
-            ? parsed
-            : Array.isArray(parsed?.entries)
-                ? parsed.entries
-                : Array.isArray(parsed?.accounts)
-                    ? parsed.accounts
-                    : [];
-
-        const entries = new Map<string, WatchOnlyRegistryEntry>();
-        for (const item of sourceEntries) {
-            const entry = toEntry(item);
-            if (!entry) continue;
-            entries.set(entry.address, entry);
-        }
-        tradeLayerStateCache = normalizeTradeLayerStateSnapshot(parsed?.tradeLayerState);
-        return entries;
-    } catch (error) {
-        console.warn(`[watchonly-registry] Failed to load ${registryPath}:`, (error as Error)?.message || error);
+    if (!fs.existsSync(registryPath)) {
         return new Map();
     }
+
+    let parsed: any;
+    try {
+        parsed = JSON.parse(await fs.promises.readFile(registryPath, 'utf8'));
+    } catch (error) {
+        throw registryUnreadable(registryPath, error);
+    }
+    const sourceEntries = Array.isArray(parsed)
+        ? parsed
+        : Array.isArray(parsed?.entries)
+            ? parsed.entries
+            : Array.isArray(parsed?.accounts)
+                ? parsed.accounts
+                : null;
+    if (!sourceEntries) {
+        throw registryUnreadable(registryPath, 'no entries array');
+    }
+
+    const entries = new Map<string, WatchOnlyRegistryEntry>();
+    for (const item of sourceEntries) {
+        const entry = toEntry(item);
+        if (!entry) continue;
+        entries.set(entry.address, entry);
+    }
+    tradeLayerStateCache = normalizeTradeLayerStateSnapshot(parsed?.tradeLayerState);
+    return entries;
 }
 
 async function getRegistryEntries(): Promise<Map<string, WatchOnlyRegistryEntry>> {
@@ -449,25 +489,41 @@ async function getRegistryEntries(): Promise<Map<string, WatchOnlyRegistryEntry>
     return registryLoadPromise;
 }
 
+async function syncDirectory(dir: string): Promise<void> {
+    // Makes the rename durable. Not every platform can open a directory for sync.
+    const handle = await fs.promises.open(dir, 'r').catch(() => null);
+    if (!handle) return;
+    try {
+        await handle.sync();
+    } catch {
+        // ignored: the rename already happened
+    } finally {
+        await handle.close();
+    }
+}
+
+// Write a temp file, fsync it, keep the previous file as registry.json.bak, then rename over the registry.
+// The registry path is never truncated or partly written.
 async function persistRegistryEntries(entries: Map<string, WatchOnlyRegistryEntry>): Promise<void> {
     const registryPath = getRegistryPath();
-    const snapshot = snapshotFromEntries(entries);
+    const body = `${JSON.stringify(snapshotFromEntries(entries), null, 2)}\n`;
     const dir = path.dirname(registryPath);
     await fs.promises.mkdir(dir, { recursive: true });
 
     const tmpPath = `${registryPath}.${process.pid}.${Date.now()}.${randomBytes(4).toString('hex')}.tmp`;
     try {
-        await fs.promises.writeFile(tmpPath, `${JSON.stringify(snapshot, null, 2)}\n`, 'utf8');
+        const handle = await fs.promises.open(tmpPath, 'wx');
         try {
-            await fs.promises.rename(tmpPath, registryPath);
-        } catch (renameError: any) {
-            const message = String(renameError?.message || renameError || '').toLowerCase();
-            if (message.includes('enoent')) {
-                await fs.promises.writeFile(registryPath, `${JSON.stringify(snapshot, null, 2)}\n`, 'utf8');
-            } else {
-                throw renameError;
-            }
+            await handle.writeFile(body, 'utf8');
+            await handle.sync();
+        } finally {
+            await handle.close();
         }
+        if (fs.existsSync(registryPath)) {
+            await fs.promises.copyFile(registryPath, `${registryPath}.bak`);
+        }
+        await fs.promises.rename(tmpPath, registryPath);
+        await syncDirectory(dir);
         registryCache = entries;
     } finally {
         await fs.promises.unlink(tmpPath).catch(() => undefined);
@@ -504,6 +560,20 @@ async function upsertWatchOnlyRegistryEntries(
         }
 
         const existing = registry.get(entry.address);
+        const refusal = registrationError(existing, entry);
+        if (refusal) {
+            failed += 1;
+            results.push({
+                address: entry.address,
+                pubkey: entry.pubkey,
+                imported: false,
+                refreshed: false,
+                skipped: false,
+                updated: false,
+                error: refusal,
+            });
+            continue;
+        }
         const merged: WatchOnlyRegistryEntry = {
             ...(existing || entry),
             ...entry,
@@ -568,8 +638,8 @@ export async function bootstrapWatchOnlyRegistryFromSeed(input?: {
     network?: string;
     force?: boolean;
 }) {
-    const sourceUrl = trimSlash(String(input?.sourceUrl || envConfig.WATCHONLY_REGISTRY_SEED_URL || ''));
-    if (!sourceUrl) {
+    const rawSourceUrl = trimSlash(String(input?.sourceUrl || envConfig.WATCHONLY_REGISTRY_SEED_URL || ''));
+    if (!rawSourceUrl) {
         return {
             imported: 0,
             refreshed: 0,
@@ -581,6 +651,18 @@ export async function bootstrapWatchOnlyRegistryFromSeed(input?: {
             sourceUrl: null,
         };
     }
+
+    // Issue #1 / C2 (defense at the sink): every caller — including the
+    // background startup/reconcile path that falls back to
+    // WATCHONLY_REGISTRY_SEED_URL — must pass the SSRF/https policy before any
+    // fetch happens. Never fetch a refused source.
+    const validated = validateBootstrapSourceUrl(rawSourceUrl, envConfig.ALLOW_INSECURE_BOOTSTRAP);
+    if (!validated.ok || !validated.sourceUrl) {
+        const message = `Bootstrap seed URL refused: ${validated.error || 'invalid source URL'}`;
+        console.warn(`[watchonly-registry] ${message} (${rawSourceUrl})`);
+        throw new Error(message);
+    }
+    const sourceUrl = validated.sourceUrl;
 
     const current = await loadWatchOnlyRegistrySnapshot();
     if (!input?.force && current.entries.length > 0) {
@@ -600,7 +682,14 @@ export async function bootstrapWatchOnlyRegistryFromSeed(input?: {
         ? `${sourceUrl}/address/watchonly?network=${encodeURIComponent(String(input.network))}`
         : `${sourceUrl}/address/watchonly`;
 
-    const response = await axios.get(url, { timeout: 15_000 });
+    // Issue #1 / C2: never follow redirects on the bootstrap fetch — a public
+    // https host could otherwise redirect us to an internal/metadata address.
+    // Round 8: the seed snapshot body is capped as well (a seed host could return gigabytes).
+    const response = await outboundCall({
+        url,
+        timeoutMs: OUTBOUND_TIMEOUT_MS,
+        maxBytes: OUTBOUND_LIMITS.bootstrapMaxResponseBytes,
+    });
     const payload: any = response.data || {};
     const entries = Array.isArray(payload?.entries)
         ? payload.entries
@@ -656,6 +745,18 @@ async function importWatchOnlyAccount(
     const entries = await getRegistryEntries();
     const now = Date.now();
     const existing = entries.get(normalized.address);
+    const refusal = registrationError(existing, normalized);
+    if (refusal) {
+        return {
+            address: normalized.address,
+            pubkey: normalized.pubkey,
+            imported: false,
+            refreshed: false,
+            skipped: false,
+            updated: false,
+            error: refusal,
+        };
+    }
     const samePubkey = existing?.pubkey === normalized.pubkey;
     const refreshRequested = !!options?.refresh;
     const registryMatched = !!existing && samePubkey;
@@ -802,6 +903,14 @@ async function importWatchOnlyAccount(
     }
 }
 
+// For callers that register a pair with a node: the refusal reason, or null when the pair may be registered.
+export async function watchOnlyRegistrationError(account: WatchOnlyAccount): Promise<string | null> {
+    const normalized = normalizeAccount(account);
+    if (!normalized) return 'Invalid watch-only account';
+    const entries = await getRegistryEntries();
+    return registrationError(entries.get(normalized.address), normalized);
+}
+
 export async function resolveWatchOnlyPubkey(address: string): Promise<string | undefined> {
     const entries = await getRegistryEntries();
     return entries.get(normalize(address))?.pubkey;
@@ -889,10 +998,6 @@ export async function recordTradeLayerRpcSnapshot(input: {
         },
     };
 
-    const registry = await getRegistryEntries();
-    await persistRegistryEntries(registry).catch((error) => {
-        console.warn('[watchonly-registry] persist skipped after trade-layer snapshot:', (error as Error)?.message || error);
-    });
     return tradeLayerStateCache.byMethod[method];
 }
 
@@ -986,16 +1091,6 @@ function normalizeSnapshotUtxo(utxo: any) {
     };
 }
 
-function computeSnapshotHash(utxos: Array<ReturnType<typeof normalizeSnapshotUtxo>>) {
-    const canonical = (utxos || []).filter(Boolean).slice().sort((a, b) => {
-        if (a.txid === b.txid) {
-            return a.vout - b.vout;
-        }
-        return a.txid.localeCompare(b.txid);
-    });
-    return require('crypto').createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
-}
-
 export async function recordWatchOnlySnapshot(input: {
     network?: string;
     address: string;
@@ -1012,7 +1107,7 @@ export async function recordWatchOnlySnapshot(input: {
     const address = normalize(input.address);
     const network = normalize(input.network || envConfig.NETWORK || '').toLowerCase();
     const pubkey = normalize(input.pubkey || '');
-    if (!address || !pubkey) {
+    if (!address || !pubkey || registrationError(registry.get(address), { address, pubkey })) {
         return null;
     }
 
@@ -1030,6 +1125,7 @@ export async function recordWatchOnlySnapshot(input: {
     const utxos = (Array.isArray(input.utxos) ? input.utxos : [])
         .map(normalizeSnapshotUtxo)
         .filter(Boolean);
+    const snapshotDigest = utxoSetDigest(utxos);
 
     console.log('[portfolio-heartbeat][relayer][registry] snapshot', {
         address,
@@ -1056,9 +1152,9 @@ export async function recordWatchOnlySnapshot(input: {
         lastSnapshotHeight: normalizeHeight(input.scannedHeight) ?? existing.lastSnapshotHeight ?? null,
         scanSourceNodeId: input.scanSourceNodeId || existing.scanSourceNodeId || null,
         lastUtxoSnapshot: {
-            hash: computeSnapshotHash(utxos),
-            count: utxos.length,
-            totalAmount: utxos.reduce((sum, item) => sum + Number(item.amount || 0), 0),
+            hash: snapshotDigest.digest,
+            count: snapshotDigest.count,
+            totalAmount: snapshotDigest.totalSats / 1e8,
             updatedAt: now,
             scannedHeight: normalizeHeight(input.scannedHeight),
             scanSourceNodeId: input.scanSourceNodeId || existing.scanSourceNodeId || null,
@@ -1069,64 +1165,6 @@ export async function recordWatchOnlySnapshot(input: {
     registry.set(key, next);
     await persistRegistryEntries(registry).catch((error) => {
         console.warn('[watchonly-registry] persist skipped after snapshot:', (error as Error)?.message || error);
-    });
-    return next;
-}
-
-export async function recordWatchOnlyTokenSnapshot(input: {
-    network?: string;
-    address: string;
-    pubkey?: string;
-    balances: Array<{
-        propertyId: string | number;
-        ticker?: string;
-        amount: number;
-        available: number;
-        reserved: number;
-        margin: number;
-        vesting: number;
-        channel: number;
-    }>;
-    scannedHeight?: number | null;
-    scanSourceNodeId?: string | null;
-}) {
-    const registry = await getRegistryEntries();
-    const now = Date.now();
-    const address = normalize(input.address);
-    const pubkey = normalize(input.pubkey || '');
-    if (!address) return null;
-
-    const existing = registry.get(address) || {
-        address,
-        pubkey: pubkey || '',
-        source: 'snapshot',
-        firstSeenAt: now,
-        lastSeenAt: now,
-        lastImportedAt: null,
-        importCount: 0,
-    } as WatchOnlyRegistryEntry;
-
-    const balances = (Array.isArray(input.balances) ? input.balances : [])
-        .map(normalizeTokenBalance)
-        .filter(Boolean);
-
-    const next: WatchOnlyRegistryEntry = {
-        ...existing,
-        address,
-        pubkey: pubkey || existing.pubkey,
-        source: existing.source || 'snapshot',
-        lastSeenAt: now,
-        lastTokenSnapshot: {
-            updatedAt: now,
-            scannedHeight: normalizeHeight(input.scannedHeight),
-            scanSourceNodeId: input.scanSourceNodeId || existing.scanSourceNodeId || null,
-            balances,
-        },
-    };
-
-    registry.set(address, next);
-    await persistRegistryEntries(registry).catch((error) => {
-        console.warn('[watchonly-registry] persist skipped after token snapshot:', (error as Error)?.message || error);
     });
     return next;
 }
