@@ -98,10 +98,7 @@ pub fn parse_script_hex(s: &str) -> Result<ScriptBuf> {
 /// well-formed entries, every output pays the address, no duplicate outpoints.
 pub fn validate_utxos(raw: &[Value], address: &DecodedAddress, max: usize) -> Result<Vec<Utxo>> {
     if raw.len() > max {
-        return Err(Error::TooMany {
-            what: "utxos",
-            max,
-        });
+        return Err(Error::TooMany { what: "utxos", max });
     }
     let mut seen = BTreeSet::new();
     let mut out = Vec::with_capacity(raw.len());
@@ -158,7 +155,12 @@ pub fn derive_first_funding(
     let mut rows: Vec<(u64, String)> = utxos
         .iter()
         .filter(|(t, c)| *c > 0 && !t.trim().is_empty())
-        .map(|(t, c)| (tip.saturating_add(1).saturating_sub(*c), t.trim().to_string()))
+        .map(|(t, c)| {
+            (
+                tip.saturating_add(1).saturating_sub(*c),
+                t.trim().to_string(),
+            )
+        })
         .collect();
     rows.sort();
     match rows.into_iter().next() {

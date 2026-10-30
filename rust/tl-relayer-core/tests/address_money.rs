@@ -9,11 +9,22 @@ use tl_relayer_core::{Amount, Error};
 fn network_parse_is_exact() {
     assert_eq!(Network::parse("LTCTEST").unwrap(), Network::LTC_TEST);
     assert_eq!(Network::parse(" ltc ").unwrap(), Network::LTC);
-    assert_eq!(Network::parse("litecoin.testnet").unwrap(), Network::LTC_TEST);
+    assert_eq!(
+        Network::parse("litecoin.testnet").unwrap(),
+        Network::LTC_TEST
+    );
     assert_eq!(Network::parse("DOGETEST").unwrap(), Network::DOGE_TEST);
     assert_eq!(Network::parse("bitcoin.mainnet").unwrap(), Network::BTC);
     // Legacy `normalizeNetwork` mapped any unknown "*TEST*" string to LTCTEST.
-    for bad in ["", "TEST", "MYTESTNET", "LTC-TEST", "ltctestnet", "regtest", "x".repeat(40).as_str()] {
+    for bad in [
+        "",
+        "TEST",
+        "MYTESTNET",
+        "LTC-TEST",
+        "ltctestnet",
+        "regtest",
+        "x".repeat(40).as_str(),
+    ] {
         assert!(Network::parse(bad).is_err(), "{bad}");
     }
 }
@@ -34,24 +45,58 @@ fn amounts_parse_exactly() {
     for (s, sat) in ok {
         assert_eq!(Amount::parse_coin(s).unwrap().sat(), sat, "{s}");
     }
-    for bad in ["", "-1", "+1", "1.", ".", "0.123456789", "1e", "1e-9", "abc", "1,5", " 1", "1e400", "99999999999999999999999"] {
+    for bad in [
+        "",
+        "-1",
+        "+1",
+        "1.",
+        ".",
+        "0.123456789",
+        "1e",
+        "1e-9",
+        "abc",
+        "1,5",
+        " 1",
+        "1e400",
+        "99999999999999999999999",
+    ] {
         assert!(Amount::parse_coin(bad).is_err(), "{bad}");
     }
     // 0.1 + 0.2 as an IEEE double is not an 8-decimal amount: rejected, not rounded.
     assert!(Amount::from_json_coin(&json!(0.1 + 0.2)).is_err());
-    assert_eq!(Amount::from_json_coin(&json!(0.00001)).unwrap().sat(), 1_000);
-    assert_eq!(Amount::from_json_coin(&json!("2.5")).unwrap().sat(), 250_000_000);
+    assert_eq!(
+        Amount::from_json_coin(&json!(0.00001)).unwrap().sat(),
+        1_000
+    );
+    assert_eq!(
+        Amount::from_json_coin(&json!("2.5")).unwrap().sat(),
+        250_000_000
+    );
     assert!(Amount::from_json_coin(&json!(null)).is_err());
-    assert_eq!(Amount::from_sat(1_234_567_890).to_coin_string(), "12.34567890");
-    assert!(Amount::from_sat(u64::MAX).checked_add(Amount::from_sat(1)).is_err());
-    assert!(Amount::from_sat(22_000_000 * 100_000_000).check_money(Network::BTC).is_err());
-    assert!(Amount::from_sat(22_000_000 * 100_000_000).check_money(Network::LTC).is_ok());
+    assert_eq!(
+        Amount::from_sat(1_234_567_890).to_coin_string(),
+        "12.34567890"
+    );
+    assert!(Amount::from_sat(u64::MAX)
+        .checked_add(Amount::from_sat(1))
+        .is_err());
+    assert!(Amount::from_sat(22_000_000 * 100_000_000)
+        .check_money(Network::BTC)
+        .is_err());
+    assert!(Amount::from_sat(22_000_000 * 100_000_000)
+        .check_money(Network::LTC)
+        .is_ok());
 }
 
 #[test]
 fn addresses_decode_per_network() {
     let pk = key(1);
-    for net in [Network::BTC, Network::BTC_TEST, Network::LTC, Network::LTC_TEST] {
+    for net in [
+        Network::BTC,
+        Network::BTC_TEST,
+        Network::LTC,
+        Network::LTC_TEST,
+    ] {
         let w = p2wpkh(net, &pk);
         let d = decode_address(&w, net).unwrap();
         assert_eq!(d.kind, AddressKind::P2wpkh);
@@ -135,7 +180,10 @@ fn validate_address_matches_node_shape() {
     assert_eq!(v["witness_version"], 0);
     assert_eq!(v["witness_program"].as_str().unwrap().len(), 40);
     assert_eq!(validate_address("nonsense", NET), json!({"isvalid": false}));
-    assert_eq!(validate_address(&a, Network::BTC), json!({"isvalid": false}));
+    assert_eq!(
+        validate_address(&a, Network::BTC),
+        json!({"isvalid": false})
+    );
 }
 
 #[test]

@@ -19,7 +19,7 @@ use bitcoin::absolute::LockTime;
 use bitcoin::script::PushBytesBuf;
 use bitcoin::transaction::Version;
 use bitcoin::{Amount as BAmount, OutPoint, Psbt, ScriptBuf, Sequence, Transaction, TxIn, TxOut};
-use bitcoin::{Witness, WScriptHash};
+use bitcoin::{WScriptHash, Witness};
 use std::collections::BTreeSet;
 
 pub const MIN_FEE_RATE: u64 = 1_000; // sat per kvB (1 sat/vB)
@@ -192,10 +192,7 @@ fn classify_input(u: &Utxo, network: Network) -> Result<InKind> {
 fn vsize(kinds: &[InKind], out_script_lens: &[usize], any_witness: bool) -> u64 {
     let base = if any_witness { 11 } else { 10 };
     base + kinds.iter().map(|k| in_vbytes(*k)).sum::<u64>()
-        + out_script_lens
-            .iter()
-            .map(|l| out_vbytes(*l))
-            .sum::<u64>()
+        + out_script_lens.iter().map(|l| out_vbytes(*l)).sum::<u64>()
 }
 
 fn fee_for(vsize: u64, rate: u64) -> u64 {
@@ -220,7 +217,12 @@ pub fn order_candidates(c: &mut [Utxo]) {
     c.sort_by(|a, b| {
         b.amount
             .cmp(&a.amount)
-            .then_with(|| a.outpoint.txid.to_string().cmp(&b.outpoint.txid.to_string()))
+            .then_with(|| {
+                a.outpoint
+                    .txid
+                    .to_string()
+                    .cmp(&b.outpoint.txid.to_string())
+            })
             .then_with(|| a.outpoint.vout.cmp(&b.outpoint.vout))
     });
 }
@@ -239,9 +241,7 @@ fn evaluate(
     data_script: &Option<ScriptBuf>,
     dust: u64,
 ) -> Result<Option<Evaluated>> {
-    let any_witness = kinds
-        .iter()
-        .any(|k| !matches!(k, InKind::P2pkh));
+    let any_witness = kinds.iter().any(|k| !matches!(k, InKind::P2pkh));
     let mut lens_nc = vec![plan.to.script.len()];
     if let Some(d) = data_script {
         lens_nc.push(d.len());
@@ -271,7 +271,9 @@ fn evaluate(
         let change = total - need_c;
         if change >= dust {
             let send = match plan.fee_mode {
-                FeeMode::SubtractFromAmount => amount.checked_sub(fee_c).ok_or(Error::DustOutput)?,
+                FeeMode::SubtractFromAmount => {
+                    amount.checked_sub(fee_c).ok_or(Error::DustOutput)?
+                }
                 FeeMode::ExtraOnTop => amount,
             };
             if send < dust {

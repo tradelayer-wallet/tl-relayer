@@ -151,7 +151,9 @@ pub fn utxo_json(u: &Utxo) -> Value {
 impl<S: RegistryStore, C: Clock, T: RpcTransport> WatchOnlyService<S, C, T> {
     pub fn new(cfg: ServiceConfig, registry: Registry<S, C>, router: Router<T>) -> Result<Self> {
         if registry.network() != cfg.network || router.network != cfg.network {
-            return Err(Error::Config("registry, router and service networks differ"));
+            return Err(Error::Config(
+                "registry, router and service networks differ",
+            ));
         }
         Ok(WatchOnlyService {
             cfg,
@@ -227,7 +229,10 @@ impl<S: RegistryStore, C: Clock, T: RpcTransport> WatchOnlyService<S, C, T> {
             timeout_ms: None,
         };
         let params = vec![self.account_payload(&dec.text, &pk_hex)];
-        match self.router.call(public("tl_watchonly_register")?, params, &opts) {
+        match self
+            .router
+            .call(public("tl_watchonly_register")?, params, &opts)
+        {
             Ok(ok) => {
                 self.registry.register(
                     ctx,
@@ -262,7 +267,11 @@ impl<S: RegistryStore, C: Clock, T: RpcTransport> WatchOnlyService<S, C, T> {
 
     /// `POST /address/sync-watchonly`. Returns only the submitted accounts'
     /// results; the legacy response embedded the whole registry.
-    pub fn import_accounts(&mut self, ctx: &AuthContext, accounts: &[Account]) -> Result<ImportSummary> {
+    pub fn import_accounts(
+        &mut self,
+        ctx: &AuthContext,
+        accounts: &[Account],
+    ) -> Result<ImportSummary> {
         ctx.require(Capability::Register)?;
         let max = self.registry.limits().max_batch;
         if accounts.len() > max {
@@ -274,7 +283,10 @@ impl<S: RegistryStore, C: Clock, T: RpcTransport> WatchOnlyService<S, C, T> {
         let mut sum = ImportSummary::default();
         let mut seen = BTreeSet::new();
         for a in accounts {
-            let key = (a.address.trim().to_string(), a.pubkey.trim().to_ascii_lowercase());
+            let key = (
+                a.address.trim().to_string(),
+                a.pubkey.trim().to_ascii_lowercase(),
+            );
             if !seen.insert(key) {
                 sum.skipped += 1;
                 continue;
@@ -381,7 +393,10 @@ impl<S: RegistryStore, C: Clock, T: RpcTransport> WatchOnlyService<S, C, T> {
             timeout_ms: None,
         };
         let params = vec![self.account_payload(&dec.text, &pk_hex)];
-        match self.router.call(public("tl_watchonly_utxos")?, params, &opts) {
+        match self
+            .router
+            .call(public("tl_watchonly_utxos")?, params, &opts)
+        {
             Err(f) => self.cached_or(&dec, to_error(f)),
             Ok(ok) => self.accept_provider_utxos(&dec, &pk_hex, ok.data, ok.provider_node_id),
         }
@@ -420,8 +435,15 @@ impl<S: RegistryStore, C: Clock, T: RpcTransport> WatchOnlyService<S, C, T> {
             .as_object()
             .ok_or_else(|| Error::Upstream("malformed UTXO payload".into()))?;
         if let Some(a) = obj.get("address").and_then(Value::as_str) {
-            if decode_address(a, self.net()).map(|d| d.text).ok().as_deref() != Some(dec.text.as_str()) {
-                return Err(Error::Upstream("provider answered for a different address".into()));
+            if decode_address(a, self.net())
+                .map(|d| d.text)
+                .ok()
+                .as_deref()
+                != Some(dec.text.as_str())
+            {
+                return Err(Error::Upstream(
+                    "provider answered for a different address".into(),
+                ));
             }
         }
         if let Some(n) = obj.get("network").and_then(Value::as_str) {
@@ -429,7 +451,9 @@ impl<S: RegistryStore, C: Clock, T: RpcTransport> WatchOnlyService<S, C, T> {
         }
         if let Some(k) = obj.get("pubkey").and_then(Value::as_str) {
             if k.to_ascii_lowercase() != pk_hex {
-                return Err(Error::Upstream("provider answered for a different pubkey".into()));
+                return Err(Error::Upstream(
+                    "provider answered for a different pubkey".into(),
+                ));
             }
         }
         let raw = obj
@@ -463,7 +487,9 @@ impl<S: RegistryStore, C: Clock, T: RpcTransport> WatchOnlyService<S, C, T> {
         );
         let recorded = match rec {
             Ok(()) => true,
-            Err(Error::StaleSnapshot { have, got }) => return Err(Error::StaleSnapshot { have, got }),
+            Err(Error::StaleSnapshot { have, got }) => {
+                return Err(Error::StaleSnapshot { have, got })
+            }
             Err(Error::Persist(m)) => return Err(Error::Persist(m)),
             Err(_) => false,
         };
@@ -554,7 +580,8 @@ impl<S: RegistryStore, C: Clock, T: RpcTransport> WatchOnlyService<S, C, T> {
         ctx.require(Capability::Register)?;
         let dec = decode_address(address.trim(), self.net())?;
         let local = self.registry.get(ctx, &dec.text)?;
-        let ext = fetch_external_snapshot(external, &dec, self.registry.now(), &self.cfg.external).ok();
+        let ext =
+            fetch_external_snapshot(external, &dec, self.registry.now(), &self.cfg.external).ok();
         let verdict = compare_snapshots(local.utxo_snapshot.as_ref(), ext.as_ref());
         Ok(VerifyReport {
             address: dec.text,
@@ -610,7 +637,11 @@ impl<S: RegistryStore, C: Clock, T: RpcTransport> WatchOnlyService<S, C, T> {
         }
         let from = from_height
             .or_else(|| starts.iter().min().copied())
-            .unwrap_or_else(|| tip.or(self.registry.observed_tip()).unwrap_or(0).saturating_sub(lookback));
+            .unwrap_or_else(|| {
+                tip.or(self.registry.observed_tip())
+                    .unwrap_or(0)
+                    .saturating_sub(lookback)
+            });
         const MAX_HEIGHT: u64 = 100_000_000;
         if from > MAX_HEIGHT || to_height.is_some_and(|t| t > MAX_HEIGHT || t < from) {
             return Err(Error::InvalidField("height range"));
@@ -648,7 +679,12 @@ impl<S: RegistryStore, C: Clock, T: RpcTransport> WatchOnlyService<S, C, T> {
 
     // -- unsigned transactions --------------------------------------------------------
 
-    fn fresh_utxos(&mut self, ctx: &AuthContext, dec: &DecodedAddress, pubkey: &str) -> Result<UtxoReply> {
+    fn fresh_utxos(
+        &mut self,
+        ctx: &AuthContext,
+        dec: &DecodedAddress,
+        pubkey: &str,
+    ) -> Result<UtxoReply> {
         let r = self.list_unspent(ctx, &dec.text, Some(pubkey), None)?;
         if r.from_cache || r.height.is_none() {
             return Err(Error::SnapshotUnavailable(
@@ -661,7 +697,11 @@ impl<S: RegistryStore, C: Clock, T: RpcTransport> WatchOnlyService<S, C, T> {
     /// Build an unsigned PSBT paying `to`. Inputs come from a fresh provider
     /// snapshot of the registered `from` address; caller-supplied inputs only
     /// narrow that set. Change always returns to `from`.
-    pub fn build_unsigned(&mut self, ctx: &AuthContext, req: &BuildTxRequest) -> Result<UnsignedTx> {
+    pub fn build_unsigned(
+        &mut self,
+        ctx: &AuthContext,
+        req: &BuildTxRequest,
+    ) -> Result<UnsignedTx> {
         ctx.require(Capability::Register)?;
         self.check_network(Some(&req.network))?;
         let from = decode_address(&req.from_address, self.net())?;
@@ -680,7 +720,11 @@ impl<S: RegistryStore, C: Clock, T: RpcTransport> WatchOnlyService<S, C, T> {
             if !wanted.is_subset(&have) {
                 return Err(Error::InputNotVerified);
             }
-            reply.utxos.into_iter().filter(|u| wanted.contains(&u.outpoint)).collect()
+            reply
+                .utxos
+                .into_iter()
+                .filter(|u| wanted.contains(&u.outpoint))
+                .collect()
         };
         tx::build_unsigned(&BuildPlan {
             from: &from,
@@ -769,7 +813,11 @@ impl<S: RegistryStore, C: Clock, T: RpcTransport> WatchOnlyService<S, C, T> {
     pub fn broadcast(&mut self, ctx: &AuthContext, raw_hex: &str) -> Result<Value> {
         ctx.require(Capability::Register)?;
         let tx = parse_raw_tx(raw_hex)?;
-        if tx.input.iter().any(|i| i.script_sig.is_empty() && i.witness.is_empty()) {
+        if tx
+            .input
+            .iter()
+            .any(|i| i.script_sig.is_empty() && i.witness.is_empty())
+        {
             return Err(Error::InvalidField("transaction is not fully signed"));
         }
         let ok = self
@@ -800,7 +848,8 @@ impl<S: RegistryStore, C: Clock, T: RpcTransport> WatchOnlyService<S, C, T> {
         }
         if self.faucet_log.len() >= FAUCET_LOG_MAX {
             let cutoff = self.cfg.faucet_cooldown_ms;
-            self.faucet_log.retain(|_, t| now.saturating_sub(*t) < cutoff);
+            self.faucet_log
+                .retain(|_, t| now.saturating_sub(*t) < cutoff);
             if self.faucet_log.len() >= FAUCET_LOG_MAX {
                 return Err(Error::Forbidden("faucet is busy"));
             }
@@ -899,7 +948,9 @@ fn key_pair(o: &Map<String, Value>, k: &'static str) -> Result<(String, Option<S
 }
 
 fn outpoint_of(v: &Value) -> Result<OutPoint> {
-    let o = v.as_object().ok_or(Error::InvalidOutpoint("not an object"))?;
+    let o = v
+        .as_object()
+        .ok_or(Error::InvalidOutpoint("not an object"))?;
     let txid = utxo::parse_txid(str_field(o, "txid")?)?;
     let vout = o
         .get("vout")
@@ -957,7 +1008,9 @@ pub struct BuildTxRequest {
 impl BuildTxRequest {
     /// Parse `txConfig` (the body's top-level `network` fills a missing one).
     pub fn from_json(tx_config: &Value, body_network: Option<&str>) -> Result<Self> {
-        let o = tx_config.as_object().ok_or(Error::InvalidField("txConfig"))?;
+        let o = tx_config
+            .as_object()
+            .ok_or(Error::InvalidField("txConfig"))?;
         reject_client_fee_fields(o)?;
         let (from_address, from_pubkey) = key_pair(o, "fromKeyPair")?;
         let (to_address, _) = key_pair(o, "toKeyPair")?;
@@ -1137,9 +1190,12 @@ impl<S: RegistryStore, C: Clock, T: RpcTransport> GatewayHooks for ServiceHooks<
 
     fn watchonly_utxos(&mut self, ctx: &AuthContext, params: &[Value]) -> Result<Value> {
         let (acct, network) = account_of(params)?;
-        let r = self
-            .service
-            .list_unspent(ctx, &acct.address, Some(&acct.pubkey), network.as_deref())?;
+        let r = self.service.list_unspent(
+            ctx,
+            &acct.address,
+            Some(&acct.pubkey),
+            network.as_deref(),
+        )?;
         Ok(json!({
             "address": r.address,
             "network": self.service.net().collator_name(),
@@ -1161,10 +1217,11 @@ impl<S: RegistryStore, C: Clock, T: RpcTransport> GatewayHooks for ServiceHooks<
             payload: ev.payload.clone(),
         };
         // Cache failures never fail the request.
-        let _ = self
-            .service
-            .registry
-            .record_trade_layer_snapshot(&AuthContext::system(), ev.method, snap);
+        let _ = self.service.registry.record_trade_layer_snapshot(
+            &AuthContext::system(),
+            ev.method,
+            snap,
+        );
     }
 }
 

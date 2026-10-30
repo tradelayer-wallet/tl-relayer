@@ -85,7 +85,11 @@ pub fn normalize_ip(raw: &str) -> Result<String> {
 
 /// Two ASCII letters, uppercased; anything else is `UNKNOWN`.
 pub fn normalize_country(v: Option<&Value>) -> String {
-    let s = v.and_then(Value::as_str).unwrap_or("").trim().to_uppercase();
+    let s = v
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_uppercase();
     if s.len() == 2 && s.bytes().all(|b| b.is_ascii_uppercase()) {
         s
     } else {
@@ -115,8 +119,16 @@ pub fn country_from_criminalip(data: &Value) -> String {
         .and_then(Value::as_array)
     {
         for e in entries {
-            for k in ["org_country_code", "country_code", "country", "registry_country_code"] {
-                if let Some(c) = e.get(k).filter(|c| c.as_str().is_some_and(|s| !s.is_empty())) {
+            for k in [
+                "org_country_code",
+                "country_code",
+                "country",
+                "registry_country_code",
+            ] {
+                if let Some(c) = e
+                    .get(k)
+                    .filter(|c| c.as_str().is_some_and(|s| !s.is_empty()))
+                {
                     return normalize_country(Some(c));
                 }
             }
@@ -265,12 +277,15 @@ impl<I: IpIntel, C: Clock> AttestationService<I, C> {
                 ),
             };
         }
-        let mut country = [info.as_ref().map(|i| i.country.as_str()), crim.as_ref().map(|c| c.country.as_str())]
-            .into_iter()
-            .flatten()
-            .find(|c| *c != "UNKNOWN")
-            .unwrap_or("UNKNOWN")
-            .to_string();
+        let mut country = [
+            info.as_ref().map(|i| i.country.as_str()),
+            crim.as_ref().map(|c| c.country.as_str()),
+        ]
+        .into_iter()
+        .flatten()
+        .find(|c| *c != "UNKNOWN")
+        .unwrap_or("UNKNOWN")
+        .to_string();
         if country == "UNKNOWN" {
             if let Ok(v) = self.intel.ip_api(ip) {
                 let ok = v
@@ -286,14 +301,17 @@ impl<I: IpIntel, C: Clock> AttestationService<I, C> {
             }
         }
         let vpn = info.as_ref().is_some_and(|i| i.vpn) || crim.as_ref().is_some_and(|c| c.vpn);
-        let proxy = info.as_ref().is_some_and(|i| i.proxy) || crim.as_ref().is_some_and(|c| c.proxy);
+        let proxy =
+            info.as_ref().is_some_and(|i| i.proxy) || crim.as_ref().is_some_and(|c| c.proxy);
         let darkweb = crim.as_ref().is_some_and(|c| c.darkweb);
         let anon = crim.as_ref().is_some_and(|c| c.anonymous_vpn);
         let banned = self.cfg.banned_countries.contains(&country);
         let blocked = vpn || proxy || darkweb || anon || banned;
         IpAttestation {
             success: true,
-            ip: info.as_ref().map_or_else(|| ip.to_string(), |i| i.ip.clone()),
+            ip: info
+                .as_ref()
+                .map_or_else(|| ip.to_string(), |i| i.ip.clone()),
             country_code: Some(country),
             is_vpn: Some(vpn),
             is_proxy: Some(proxy),

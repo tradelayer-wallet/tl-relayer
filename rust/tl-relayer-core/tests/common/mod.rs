@@ -112,10 +112,7 @@ pub fn admin() -> AuthContext {
     ctx("admin", &[Capability::Admin])
 }
 
-pub fn registry(
-    store: MemoryStore,
-    clock: ManualClock,
-) -> Registry<MemoryStore, ManualClock> {
+pub fn registry(store: MemoryStore, clock: ManualClock) -> Registry<MemoryStore, ManualClock> {
     Registry::open(NET, Limits::default(), Policy::default(), store, clock)
         .unwrap()
         .0
@@ -138,7 +135,8 @@ pub fn rig_with(limits: Limits, cfg: ServiceConfig) -> Rig {
     let store = MemoryStore::new();
     let clock = ManualClock::new(1_000_000);
     let transport = FakeTransport::new();
-    let (reg, _) = Registry::open(NET, limits, Policy::default(), store.clone(), clock.clone()).unwrap();
+    let (reg, _) =
+        Registry::open(NET, limits, Policy::default(), store.clone(), clock.clone()).unwrap();
     let router = Router::new("tradelayer.rpc", NET, transport.clone());
     let svc = WatchOnlyService::new(cfg, reg, router).unwrap();
     Rig {
@@ -150,7 +148,12 @@ pub fn rig_with(limits: Limits, cfg: ServiceConfig) -> Rig {
 }
 
 /// Provider reply for `tl_watchonly_utxos`.
-pub fn utxos_reply(d: &DecodedAddress, rows: &[(u8, u32, &str)], height: u64, provider: &str) -> Value {
+pub fn utxos_reply(
+    d: &DecodedAddress,
+    rows: &[(u8, u32, &str)],
+    height: u64,
+    provider: &str,
+) -> Value {
     json!({
         "ok": true,
         "providerNodeId": provider,

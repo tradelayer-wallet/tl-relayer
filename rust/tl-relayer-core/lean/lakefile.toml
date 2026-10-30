@@ -1,0 +1,5 @@
+name = "relayer_core"
+defaultTargets = ["RelayerCore"]
+
+[[lean_lib]]
+name = "RelayerCore"

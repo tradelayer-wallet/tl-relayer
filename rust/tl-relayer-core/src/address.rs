@@ -52,7 +52,9 @@ pub fn decode_address(addr: &str, network: Network) -> Result<DecodedAddress> {
         Err(e) => {
             for other in Network::ALL {
                 if other != network && decode_inner(addr, other).is_ok() {
-                    return Err(Error::AddressOnOtherNetwork(other.legacy_code().to_string()));
+                    return Err(Error::AddressOnOtherNetwork(
+                        other.legacy_code().to_string(),
+                    ));
                 }
             }
             Err(e)

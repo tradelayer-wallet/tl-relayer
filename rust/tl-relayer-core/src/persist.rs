@@ -59,9 +59,17 @@ fn entry_to_json(e: &Entry) -> Value {
     let mut m = Map::new();
     m.insert("address".into(), e.address.clone().into());
     m.insert("pubkey".into(), e.pubkey.clone().into());
-    put(&mut m, "owner", e.owner.as_ref().map(|p| p.as_str().to_string()));
+    put(
+        &mut m,
+        "owner",
+        e.owner.as_ref().map(|p| p.as_str().to_string()),
+    );
     m.insert("source".into(), e.source.clone().into());
-    put(&mut m, "assignedProviderNodeId", e.assigned_provider_node_id.clone());
+    put(
+        &mut m,
+        "assignedProviderNodeId",
+        e.assigned_provider_node_id.clone(),
+    );
     put(&mut m, "assignedAt", e.assigned_at);
     m.insert("firstSeenAt".into(), e.first_seen_at.into());
     put(&mut m, "firstFundingHeight", e.first_funding_height);
@@ -72,7 +80,11 @@ fn entry_to_json(e: &Entry) -> Value {
         e.last_imported_at.map_or(Value::Null, Value::from),
     );
     m.insert("importCount".into(), e.import_count.into());
-    put(&mut m, "scanState", e.scan_state.map(|s| s.as_str().to_string()));
+    put(
+        &mut m,
+        "scanState",
+        e.scan_state.map(|s| s.as_str().to_string()),
+    );
     put(&mut m, "lastScannedAt", e.last_scanned_at);
     put(&mut m, "lastScannedHeight", e.last_scanned_height);
     put(&mut m, "scanSourceNodeId", e.scan_source_node_id.clone());
@@ -273,7 +285,9 @@ fn entry_from_json(
         .get("owner")
         .and_then(Value::as_str)
         .and_then(|s| Principal::new(s).ok());
-    let first_seen = as_u64(v.get("firstSeenAt")).filter(|n| *n > 0).unwrap_or(now);
+    let first_seen = as_u64(v.get("firstSeenAt"))
+        .filter(|n| *n > 0)
+        .unwrap_or(now);
     let utxo_snapshot = v
         .get("lastUtxoSnapshot")
         .filter(|s| s.is_object())
@@ -286,7 +300,8 @@ fn entry_from_json(
         address: dec.text.clone(),
         pubkey: pk_hex,
         owner,
-        source: opt_text(v.get("source"), limits.max_text).unwrap_or_else(|| "sync-watchonly".into()),
+        source: opt_text(v.get("source"), limits.max_text)
+            .unwrap_or_else(|| "sync-watchonly".into()),
         assigned_provider_node_id: v
             .get("assignedProviderNodeId")
             .and_then(Value::as_str)
@@ -299,7 +314,9 @@ fn entry_from_json(
             .and_then(Value::as_str)
             .filter(|t| utxo::parse_txid(t).is_ok())
             .map(str::to_string),
-        last_seen_at: as_u64(v.get("lastSeenAt")).filter(|n| *n > 0).unwrap_or(now),
+        last_seen_at: as_u64(v.get("lastSeenAt"))
+            .filter(|n| *n > 0)
+            .unwrap_or(now),
         last_imported_at: as_u64(v.get("lastImportedAt")).filter(|n| *n > 0),
         import_count: as_u64(v.get("importCount")).unwrap_or(0),
         scan_state: v
@@ -335,7 +352,10 @@ fn snapshot_from_json(
         let mut o = u.as_object()?.clone();
         // v2 stores `amountSat`; legacy stored coins in `amount`.
         if let Some(sat) = o.get("amountSat").and_then(Value::as_u64) {
-            o.insert("amount".into(), Value::String(Amount::from_sat(sat).to_coin_string()));
+            o.insert(
+                "amount".into(),
+                Value::String(Amount::from_sat(sat).to_coin_string()),
+            );
         }
         let parsed = Utxo::from_json(&Value::Object(o)).ok()?;
         utxo::check_utxo_for(&parsed, dec).ok()?;
@@ -379,14 +399,22 @@ fn token_snapshot_from_json(s: &Value, limits: &Limits, now: u64) -> TokenSnapsh
             continue;
         }
         let f = |k: &str| b.get(k).and_then(decimal_text);
-        let (Some(amount), Some(available), Some(reserved), Some(margin), Some(vesting), Some(channel)) = (
+        let (
+            Some(amount),
+            Some(available),
+            Some(reserved),
+            Some(margin),
+            Some(vesting),
+            Some(channel),
+        ) = (
             f("amount"),
             f("available"),
             f("reserved"),
             f("margin"),
             f("vesting"),
             f("channel"),
-        ) else {
+        )
+        else {
             continue;
         };
         balances.push(TokenBalance {

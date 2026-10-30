@@ -432,7 +432,10 @@ impl<S: RegistryStore, C: Clock> Registry<S, C> {
             let e = st.entries.get_mut(&address).ok_or(Error::NotFound)?;
             if let (Some(old), Some(new)) = (e.last_scanned_height, scanned_height) {
                 if new < old {
-                    return Err(Error::StaleSnapshot { have: old, got: new });
+                    return Err(Error::StaleSnapshot {
+                        have: old,
+                        got: new,
+                    });
                 }
             }
             e.last_seen_at = env.now;
@@ -495,7 +498,8 @@ impl<S: RegistryStore, C: Clock> Registry<S, C> {
             if snap.payload.to_string().len() > env.limits.max_payload_bytes {
                 return Ok(false);
             }
-            if !st.trade_layer.contains_key(&method) && st.trade_layer.len() >= env.limits.max_methods
+            if !st.trade_layer.contains_key(&method)
+                && st.trade_layer.len() >= env.limits.max_methods
             {
                 return Err(Error::TooMany {
                     what: "cached methods",
@@ -652,7 +656,11 @@ impl<S: RegistryStore, C: Clock> Registry<S, C> {
         let accounts: Vec<Account> = arr
             .iter()
             .map(|v| Account {
-                address: v.get("address").and_then(Value::as_str).unwrap_or("").into(),
+                address: v
+                    .get("address")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .into(),
                 pubkey: v.get("pubkey").and_then(Value::as_str).unwrap_or("").into(),
             })
             .collect();
@@ -898,7 +906,10 @@ fn apply_utxo_snapshot(env: &Env, st: &mut State, input: SnapshotInput) -> Resul
     }
     if let (Some(old), Some(new)) = (e.last_snapshot_height, input.scanned_height) {
         if new < old {
-            return Err(Error::StaleSnapshot { have: old, got: new });
+            return Err(Error::StaleSnapshot {
+                have: old,
+                got: new,
+            });
         }
     }
     let dec = decode_address(&e.address, env.network)?;

@@ -61,11 +61,23 @@ pub const LISTENER_METHODS: [(&str, &str); 23] = [
     ("tl_createrawtx_reference", "tl_createrawtx_reference"),
     ("tl_decodetransaction", "tl_decodeTx"),
     ("tl_getcontractinfo", "tl_getContractInfo"),
-    ("tl_channelbalanceforcommiter", "tl_channelBalanceForCommiter"),
+    (
+        "tl_channelbalanceforcommiter",
+        "tl_channelBalanceForCommiter",
+    ),
     ("tl_getinitmargin", "tl_getInitMargin"),
-    ("tl_tokentradehistoryforaddress", "tl_tokenTradeHistoryForAddress"),
-    ("tl_contracttradehistoryforaddress", "tl_contractTradeHistoryForAddress"),
-    ("tl_totaltradehistoryforaddress", "tl_totalTradeHistoryForAddress"),
+    (
+        "tl_tokentradehistoryforaddress",
+        "tl_tokenTradeHistoryForAddress",
+    ),
+    (
+        "tl_contracttradehistoryforaddress",
+        "tl_contractTradeHistoryForAddress",
+    ),
+    (
+        "tl_totaltradehistoryforaddress",
+        "tl_totalTradeHistoryForAddress",
+    ),
     ("tl_listcontractseries", "tl_listContractSeries"),
     ("tl_getattestations", "tl_getAttestations"),
     ("tl_getchannelcolumn", "tl_getChannelColumn"),
@@ -212,7 +224,9 @@ fn error_message_of(body: &Value) -> Option<String> {
 /// Port of the response handling in `callAllocatedRpc` / `callRpc`
 /// (`address.service.ts:356-391`): HTTP failures and `{ok:false}` bodies become
 /// errors; success data is `result ?? data ?? payload`.
-pub fn interpret_reply(r: std::result::Result<RawReply, String>) -> std::result::Result<RoutedOk, RpcFailure> {
+pub fn interpret_reply(
+    r: std::result::Result<RawReply, String>,
+) -> std::result::Result<RoutedOk, RpcFailure> {
     let reply = match r {
         Ok(r) => r,
         Err(m) => return Err(classify(clean(&m))),
@@ -387,7 +401,9 @@ pub fn build_listener_query(method: &str, params: &[Value]) -> Value {
     match m.as_str() {
         "tl_contractposition" => json!({"address": nn(b("address"), 0), "contractId": p(1)}),
         "tl_channelbalanceforcommiter" => json!({"address": p(0), "propertyId": p(1)}),
-        "tl_getinitmargin" => json!({"contractId": nn(b("contractId"), 0), "price": nn(b("price"), 1)}),
+        "tl_getinitmargin" => {
+            json!({"contractId": nn(b("contractId"), 0), "price": nn(b("price"), 1)})
+        }
         "tl_getcontractinfo" => json!({"contractId": nn(b("contractId"), 0)}),
         "tl_getmaxsynth" => json!({
             "address": nn(b("address"), 0),
@@ -483,7 +499,9 @@ pub struct Gateway<T: RpcTransport> {
 fn int_arg(v: Option<&Value>) -> Option<i64> {
     match v? {
         Value::Number(n) => n.as_i64().filter(|x| *x >= 0),
-        Value::String(s) if !s.is_empty() && s.len() <= 18 && s.bytes().all(|b| b.is_ascii_digit()) => {
+        Value::String(s)
+            if !s.is_empty() && s.len() <= 18 && s.bytes().all(|b| b.is_ascii_digit()) =>
+        {
             s.parse().ok()
         }
         _ => None,
@@ -528,8 +546,14 @@ impl<T: RpcTransport> Gateway<T> {
             .and_then(Value::as_array)
             .cloned()
             .unwrap_or_default();
-        if params.len() > MAX_PARAMS || Value::Array(params.clone()).to_string().len() > MAX_PARAMS_BYTES {
-            return Err(coded(400, "BAD_RPC_REQUEST", "Too many or too large params"));
+        if params.len() > MAX_PARAMS
+            || Value::Array(params.clone()).to_string().len() > MAX_PARAMS_BYTES
+        {
+            return Err(coded(
+                400,
+                "BAD_RPC_REQUEST",
+                "Too many or too large params",
+            ));
         }
         Ok(params)
     }
@@ -545,7 +569,13 @@ impl<T: RpcTransport> Gateway<T> {
     ) -> GatewayReply {
         let pm = match PublicMethod::parse(method) {
             Ok(m) => m,
-            Err(_) => return coded(403, "RPC_METHOD_FORBIDDEN", "RPC method is not available on the public mesh"),
+            Err(_) => {
+                return coded(
+                    403,
+                    "RPC_METHOD_FORBIDDEN",
+                    "RPC method is not available on the public mesh",
+                )
+            }
         };
         let mut params = match Self::bound_params(body) {
             Ok(p) => p,
@@ -560,13 +590,19 @@ impl<T: RpcTransport> Gateway<T> {
         match name {
             "tl_watchonly_register" => {
                 return match hooks.watchonly_register(ctx, &params) {
-                    Ok(v) => GatewayReply { status: 200, body: json!({"data": v}) },
+                    Ok(v) => GatewayReply {
+                        status: 200,
+                        body: json!({"data": v}),
+                    },
                     Err(e) => hook_error(&e),
                 }
             }
             "tl_watchonly_utxos" => {
                 return match hooks.watchonly_utxos(ctx, &params) {
-                    Ok(v) => GatewayReply { status: 200, body: json!({"data": v}) },
+                    Ok(v) => GatewayReply {
+                        status: 200,
+                        body: json!({"data": v}),
+                    },
                     Err(e) => hook_error(&e),
                 }
             }
@@ -580,13 +616,22 @@ impl<T: RpcTransport> Gateway<T> {
                 let Some(cid) = int_arg(raw.and_then(|r| r.get("contractId"))) else {
                     return plain(400, "Invalid contractId");
                 };
-                (vec![json!({"contractId": cid})], None, json!({"contractId": cid}))
+                (
+                    vec![json!({"contractId": cid})],
+                    None,
+                    json!({"contractId": cid}),
+                )
             }
             "tl_channelbalanceforcommiter" => {
-                let (Some(a), Some(pid)) = (self.addr_arg(params.first()), int_arg(params.get(1))) else {
+                let (Some(a), Some(pid)) = (self.addr_arg(params.first()), int_arg(params.get(1)))
+                else {
                     return plain(400, "Invalid address or propertyId");
                 };
-                (vec![json!(a), json!(pid)], Some(a), json!({"propertyId": pid}))
+                (
+                    vec![json!(a), json!(pid)],
+                    Some(a),
+                    json!({"propertyId": pid}),
+                )
             }
             "tl_getinitmargin" => {
                 let cid = int_arg(raw.and_then(|r| r.get("contractId")));
@@ -623,7 +668,11 @@ impl<T: RpcTransport> Gateway<T> {
                 let (Some(cid), Some(a)) = (int_arg(params.first()), self.addr_arg(addr_v)) else {
                     return plain(400, "Invalid contractId or address");
                 };
-                (vec![json!(cid), json!(a)], Some(a), json!({"contractId": cid}))
+                (
+                    vec![json!(cid), json!(a)],
+                    Some(a),
+                    json!({"contractId": cid}),
+                )
             }
             "tl_totaltradehistoryforaddress" => {
                 let Some(a) = self.addr_arg(params.first()) else {
@@ -694,9 +743,15 @@ impl<T: RpcTransport> Gateway<T> {
                 // Special cases return the bare payload; the default
                 // passthrough returns the `{data}` wrapper (legacy shapes).
                 if special {
-                    GatewayReply { status: 200, body: ok.data }
+                    GatewayReply {
+                        status: 200,
+                        body: ok.data,
+                    }
                 } else {
-                    GatewayReply { status: 200, body: json!({"data": ok.data}) }
+                    GatewayReply {
+                        status: 200,
+                        body: json!({"data": ok.data}),
+                    }
                 }
             }
         }
@@ -719,7 +774,13 @@ impl<T: RpcTransport> Gateway<T> {
         }
         let pm = match PublicMethod::parse(&n) {
             Ok(m) => m,
-            Err(_) => return coded(403, "RPC_METHOD_FORBIDDEN", "RPC method is not available on the public mesh"),
+            Err(_) => {
+                return coded(
+                    403,
+                    "RPC_METHOD_FORBIDDEN",
+                    "RPC method is not available on the public mesh",
+                )
+            }
         };
         if let Some(s) = body.get("service").and_then(Value::as_str) {
             if s != self.router.service {
@@ -741,7 +802,9 @@ impl<T: RpcTransport> Gateway<T> {
                 .unwrap_or_default(),
             _ => Vec::new(),
         };
-        if params.len() > MAX_PARAMS || Value::Array(params.clone()).to_string().len() > MAX_PARAMS_BYTES {
+        if params.len() > MAX_PARAMS
+            || Value::Array(params.clone()).to_string().len() > MAX_PARAMS_BYTES
+        {
             return coded(400, "BAD_RPC_REQUEST", "Too many or too large params");
         }
         let timeout = match body.get("timeoutMs") {
@@ -772,7 +835,10 @@ impl<T: RpcTransport> Gateway<T> {
                     hooks.watchonly_utxos(ctx, &params)
                 };
                 return match r {
-                    Ok(v) => GatewayReply { status: 200, body: json!({"data": v}) },
+                    Ok(v) => GatewayReply {
+                        status: 200,
+                        body: json!({"data": v}),
+                    },
                     Err(e) => hook_error(&e),
                 };
             }
@@ -790,7 +856,104 @@ impl<T: RpcTransport> Gateway<T> {
                 if let Some(p) = ok.provider_node_id {
                     m.insert("providerNodeId".into(), p.into());
                 }
-                GatewayReply { status: 200, body: Value::Object(m) }
+                GatewayReply {
+                    status: 200,
+                    body: Value::Object(m),
+                }
+            }
+        }
+    }
+
+    /// The three explicit routes (`/tl_getAttestations`, `/tl_getChannelColumn`,
+    /// `/tl_listContractSeries`). Success returns the bare provider payload and
+    /// failures use the legacy plain `{error}` body with status 502.
+    pub fn handle_explicit(
+        &mut self,
+        name: &str,
+        body: &Value,
+        hooks: &mut dyn GatewayHooks,
+    ) -> GatewayReply {
+        let key = normalize_method(name);
+        let (method, params, address, summary): (&str, Vec<Value>, Option<String>, Value) =
+            match key.as_str() {
+                "tl_getattestations" => {
+                    let id = int_arg(body.get("id").filter(|v| v.is_number()));
+                    let (Some(a), Some(id)) = (self.addr_arg(body.get("address")), id) else {
+                        return plain(400, "Invalid address or id");
+                    };
+                    (
+                        "tl_getattestations",
+                        vec![json!(a), json!(id)],
+                        Some(a),
+                        json!({"id": id}),
+                    )
+                }
+                "tl_getchannelcolumn" => {
+                    let arr = body.get("params").and_then(Value::as_array);
+                    let pick = |keys: &[&str], i: usize| -> Option<String> {
+                        let v = keys
+                            .iter()
+                            .find_map(|k| body.get(*k).filter(|v| !v.is_null()))
+                            .or_else(|| arr.and_then(|a| a.get(i)));
+                        self.addr_arg(v)
+                    };
+                    let channel = pick(&["channelAddress", "channel"], 0);
+                    let commit = pick(
+                        &["newCommitAddress", "myAddress", "myAddr", "buyerAddress"],
+                        1,
+                    );
+                    let cp = pick(&["cpAddress", "cpAddr"], 2);
+                    let (Some(c), Some(n), Some(p)) = (channel, commit, cp) else {
+                        return plain(
+                            400,
+                            "channelAddress, newCommitAddress, and cpAddress are required",
+                        );
+                    };
+                    (
+                        "tl_getchannelcolumn",
+                        vec![json!(c), json!(n), json!(p)],
+                        Some(n),
+                        json!({"channelAddress": c, "cpAddress": p}),
+                    )
+                }
+                "tl_listcontractseries" => {
+                    let v = body
+                        .get("contractId")
+                        .filter(|v| v.is_number())
+                        .or_else(|| body.get("params").and_then(|p| p.get("contractId")));
+                    let Some(cid) = int_arg(v.filter(|v| v.is_number())) else {
+                        return plain(400, "Missing or invalid contractId");
+                    };
+                    (
+                        "tl_listcontractseries",
+                        vec![json!({"contractId": cid})],
+                        None,
+                        json!({"contractId": cid}),
+                    )
+                }
+                _ => return plain(404, "not found"),
+            };
+        let Ok(pm) = PublicMethod::parse(method) else {
+            return plain(404, "not found");
+        };
+        match self
+            .router
+            .call(RoutedMethod::Public(pm), params, &CallOpts::default())
+        {
+            Err(f) => plain(502, &clean(f.message())),
+            Ok(ok) => {
+                hooks.observe(&RpcEvent {
+                    method: pm.name(),
+                    route: format!("/rpc/{}", name.trim()),
+                    address,
+                    provider_node_id: ok.provider_node_id.as_deref(),
+                    summary,
+                    payload: &ok.data,
+                });
+                GatewayReply {
+                    status: 200,
+                    body: ok.data,
+                }
             }
         }
     }
@@ -804,10 +967,19 @@ impl<T: RpcTransport> Gateway<T> {
         let canonical = match normalize_method(kind).as_str() {
             "attestation" | "issueorrevokeattestation" => "attestation",
             "commit" | "commitchannel" | "commit_tochannel" => "commit",
-            _ => return coded(403, "PAYLOAD_TYPE_FORBIDDEN", "Payload type is not available on the public mesh"),
+            _ => {
+                return coded(
+                    403,
+                    "PAYLOAD_TYPE_FORBIDDEN",
+                    "Payload type is not available on the public mesh",
+                )
+            }
         };
         match params.map(|p| encoder.encode(canonical, p)) {
-            Some(Ok(payload)) => GatewayReply { status: 200, body: json!({"payload": payload}) },
+            Some(Ok(payload)) => GatewayReply {
+                status: 200,
+                body: json!({"payload": payload}),
+            },
             Some(Err(e)) => plain(400, &clean(&e)),
             None => coded(400, "BAD_PAYLOAD_REQUEST", "Missing or invalid params.type"),
         }

@@ -46,7 +46,10 @@ fn roles(t: &UnsignedTx) -> Vec<(Role, u64)> {
 fn vector_single_input_with_change_subtract() {
     let w = wallet();
     let t = build_unsigned(&plan(&w, 400_000, vec![utxo_for(&w.from, 1, 0, 1_000_000)])).unwrap();
-    assert_eq!(roles(&t), vec![(Role::Recipient, 398_590), (Role::Change, 600_000)]);
+    assert_eq!(
+        roles(&t),
+        vec![(Role::Recipient, 398_590), (Role::Change, 600_000)]
+    );
     assert_eq!(t.fee.sat(), 1_410);
     assert_eq!(t.total_in().unwrap().sat(), 1_000_000);
     assert_eq!(t.total_out().unwrap().sat() + t.fee.sat(), 1_000_000);
@@ -58,7 +61,10 @@ fn vector_extra_on_top() {
     let mut p = plan(&w, 400_000, vec![utxo_for(&w.from, 1, 0, 1_000_000)]);
     p.fee_mode = FeeMode::ExtraOnTop;
     let t = build_unsigned(&p).unwrap();
-    assert_eq!(roles(&t), vec![(Role::Recipient, 400_000), (Role::Change, 598_590)]);
+    assert_eq!(
+        roles(&t),
+        vec![(Role::Recipient, 400_000), (Role::Change, 598_590)]
+    );
     assert_eq!(t.fee.sat(), 1_410);
 }
 
@@ -95,12 +101,20 @@ fn selection_adds_inputs_until_covered() {
     let ins: Vec<u64> = t.inputs.iter().map(|u| u.amount.sat()).collect();
     assert_eq!(ins, vec![300_000, 200_000]);
     assert_eq!(t.total_in().unwrap().sat(), 500_000);
+    // Same vector as `build P0 .sub 450000 [] [300000, 200000, 150000]` in lean/RelayerCore/Tx.lean.
+    assert_eq!(
+        roles(&t),
+        vec![(Role::Recipient, 447_910), (Role::Change, 50_000)]
+    );
+    assert_eq!(t.fee.sat(), 2_090);
 }
 
 #[test]
 fn deterministic_under_candidate_permutation() {
     let w = wallet();
-    let base: Vec<Utxo> = (1..=6).map(|i| utxo_for(&w.from, i, 0, 100_000 + u64::from(i % 3) * 7)).collect();
+    let base: Vec<Utxo> = (1..=6)
+        .map(|i| utxo_for(&w.from, i, 0, 100_000 + u64::from(i % 3) * 7))
+        .collect();
     let mut rev = base.clone();
     rev.reverse();
     let a = build_unsigned(&plan(&w, 250_000, base)).unwrap();
@@ -115,13 +129,28 @@ fn failures_are_typed() {
         build_unsigned(&plan(&w, 5_000, vec![utxo_for(&w.from, 1, 0, 1_000)])),
         Err(Error::InsufficientFunds { .. })
     ));
-    assert!(matches!(build_unsigned(&plan(&w, 5_000, vec![])), Err(Error::InsufficientFunds { have: 0, .. })));
-    assert_eq!(build_unsigned(&plan(&w, 0, vec![])).unwrap_err(), Error::InvalidAmount("zero"));
-    assert_eq!(build_unsigned(&plan(&w, 100, vec![utxo_for(&w.from, 1, 0, 9_000)])).unwrap_err(), Error::DustOutput);
+    assert!(matches!(
+        build_unsigned(&plan(&w, 5_000, vec![])),
+        Err(Error::InsufficientFunds { have: 0, .. })
+    ));
+    assert_eq!(
+        build_unsigned(&plan(&w, 0, vec![])).unwrap_err(),
+        Error::InvalidAmount("zero")
+    );
+    assert_eq!(
+        build_unsigned(&plan(&w, 100, vec![utxo_for(&w.from, 1, 0, 9_000)])).unwrap_err(),
+        Error::DustOutput
+    );
     // Fee bound.
     let mut p = plan(&w, 400_000, vec![utxo_for(&w.from, 1, 0, 1_000_000)]);
     p.fee.max_fee_sat = 1_000;
-    assert_eq!(build_unsigned(&p).unwrap_err(), Error::FeeTooHigh { fee: 1_410, max: 1_000 });
+    assert_eq!(
+        build_unsigned(&p).unwrap_err(),
+        Error::FeeTooHigh {
+            fee: 1_410,
+            max: 1_000
+        }
+    );
     // Fee rate range.
     for rate in [0, 999, 1_000_001] {
         let mut p = plan(&w, 400_000, vec![utxo_for(&w.from, 1, 0, 1_000_000)]);
@@ -139,7 +168,10 @@ fn failures_are_typed() {
 fn outputs_below_cost_are_skipped_not_selected() {
     let w = wallet();
     // 600 sat costs 680 sat to spend at 10 sat/vB: never selected.
-    let c = vec![utxo_for(&w.from, 1, 0, 600), utxo_for(&w.from, 2, 0, 1_000_000)];
+    let c = vec![
+        utxo_for(&w.from, 1, 0, 600),
+        utxo_for(&w.from, 2, 0, 1_000_000),
+    ];
     let t = build_unsigned(&plan(&w, 400_000, c)).unwrap();
     assert_eq!(t.inputs.len(), 1);
 }
@@ -153,7 +185,10 @@ fn input_count_is_bounded() {
         .collect();
     assert!(c.len() > MAX_INPUTS);
     let r = build_unsigned(&plan(&w, 600_000, c));
-    assert!(matches!(r, Err(Error::TooMany { what: "inputs", .. })), "{r:?}");
+    assert!(
+        matches!(r, Err(Error::TooMany { what: "inputs", .. })),
+        "{r:?}"
+    );
 }
 
 #[test]
@@ -179,7 +214,10 @@ fn regression_candidates_must_belong_to_the_wallet() {
     assert_eq!(r.unwrap_err(), Error::ForeignScript);
     // Duplicates are rejected, not double counted.
     let u = utxo_for(&w.from, 1, 0, 500_000);
-    assert_eq!(build_unsigned(&plan(&w, 100_000, vec![u.clone(), u])).unwrap_err(), Error::DuplicateOutpoint);
+    assert_eq!(
+        build_unsigned(&plan(&w, 100_000, vec![u.clone(), u])).unwrap_err(),
+        Error::DuplicateOutpoint
+    );
 }
 
 #[test]
@@ -196,7 +234,10 @@ fn regression_network_mismatch_between_addresses() {
         fee: FeePolicy::default(),
         fee_mode: FeeMode::SubtractFromAmount,
     };
-    assert!(matches!(build_unsigned(&p), Err(Error::NetworkMismatch { .. })));
+    assert!(matches!(
+        build_unsigned(&p),
+        Err(Error::NetworkMismatch { .. })
+    ));
 }
 
 #[test]
@@ -213,7 +254,13 @@ fn payload_is_an_op_return_output_with_zero_value() {
     for bad in [vec![], vec![b'a'; 81]] {
         let mut p = plan(&w, 400_000, vec![utxo_for(&w.from, 1, 0, 1_000_000)]);
         p.payload = Some(bad);
-        assert!(matches!(build_unsigned(&p), Err(Error::TooLarge { what: "payload", .. })));
+        assert!(matches!(
+            build_unsigned(&p),
+            Err(Error::TooLarge {
+                what: "payload",
+                ..
+            })
+        ));
     }
 }
 
@@ -224,11 +271,14 @@ fn psbt_round_trips_and_audits() {
     let bytes = tl_relayer_core::base64::decode(&t.psbt_base64()).unwrap();
     assert_eq!(bytes, t.psbt.serialize());
     let psbt = Psbt::deserialize(&bytes).unwrap();
-    assert_eq!(psbt.inputs[0].witness_utxo.as_ref().unwrap().value.to_sat(), 1_000_000);
+    assert_eq!(
+        psbt.inputs[0].witness_utxo.as_ref().unwrap().value.to_sat(),
+        1_000_000
+    );
     assert_eq!(psbt.unsigned_tx.input[0].previous_output, op(1, 0));
     let rules = AuditRules {
         wallet_script: &w.from.script,
-        allowed_recipients: &[w.to.script.clone()],
+        allowed_recipients: std::slice::from_ref(&w.to.script),
         max_fee_sat: 5_000,
     };
     let rep = audit_psbt(&bytes, &rules).unwrap();
@@ -242,17 +292,26 @@ fn psbt_round_trips_and_audits() {
         script_pubkey: attacker.script.clone(),
     });
     evil.outputs.push(Default::default());
-    assert_eq!(audit_psbt(&evil.serialize(), &rules).unwrap_err(), Error::ForeignScript);
+    assert_eq!(
+        audit_psbt(&evil.serialize(), &rules).unwrap_err(),
+        Error::ForeignScript
+    );
 
     // Understated output (inflated fee) is refused by the fee bound.
     let mut greedy = psbt.clone();
     greedy.unsigned_tx.output[1].value = bitcoin::Amount::from_sat(100_000);
-    assert!(matches!(audit_psbt(&greedy.serialize(), &rules), Err(Error::FeeTooHigh { .. })));
+    assert!(matches!(
+        audit_psbt(&greedy.serialize(), &rules),
+        Err(Error::FeeTooHigh { .. })
+    ));
 
     // A missing funding output is refused.
     let mut blind = psbt;
     blind.inputs[0].witness_utxo = None;
-    assert_eq!(audit_psbt(&blind.serialize(), &rules).unwrap_err(), Error::InputNotVerified);
+    assert_eq!(
+        audit_psbt(&blind.serialize(), &rules).unwrap_err(),
+        Error::InputNotVerified
+    );
     assert!(audit_psbt(&vec![0u8; MAX_PSBT_BYTES + 1], &rules).is_err());
     assert!(audit_psbt(b"not a psbt", &rules).is_err());
 }
@@ -285,11 +344,17 @@ fn commit_input_p2wsh_requires_a_matching_witness_script() {
     let mut bad = commit.clone();
     bad.witness_script = Some(ScriptBuf::from_bytes(vec![0x51]));
     p.required = vec![bad];
-    assert_eq!(build_unsigned(&p).unwrap_err(), Error::UnsupportedInputScript);
+    assert_eq!(
+        build_unsigned(&p).unwrap_err(),
+        Error::UnsupportedInputScript
+    );
     let mut none = commit;
     none.witness_script = None;
     p.required = vec![none];
-    assert_eq!(build_unsigned(&p).unwrap_err(), Error::UnsupportedInputScript);
+    assert_eq!(
+        build_unsigned(&p).unwrap_err(),
+        Error::UnsupportedInputScript
+    );
 }
 
 #[test]
@@ -299,13 +364,26 @@ fn required_inputs_are_always_spent_and_topped_up() {
     let addr = dec(&p2wsh(NET, &ws));
     let mut commit = utxo_for(&addr, 7, 1, 100_000);
     commit.witness_script = Some(ws);
-    let mut p = plan(&w, 400_000, vec![utxo_for(&w.from, 1, 0, 900_000), utxo_for(&w.from, 2, 0, 50_000)]);
+    let mut p = plan(
+        &w,
+        400_000,
+        vec![
+            utxo_for(&w.from, 1, 0, 900_000),
+            utxo_for(&w.from, 2, 0, 50_000),
+        ],
+    );
     p.required = vec![commit];
     let t = build_unsigned(&p).unwrap();
     assert_eq!(t.inputs[0].outpoint, op(7, 1));
     assert!(t.inputs.len() >= 2);
-    assert_eq!(t.total_out().unwrap().sat() + t.fee.sat(), t.total_in().unwrap().sat());
-    assert!(t.outputs.iter().any(|o| o.role == Role::Change && o.script == w.from.script));
+    assert_eq!(
+        t.total_out().unwrap().sat() + t.fee.sat(),
+        t.total_in().unwrap().sat()
+    );
+    assert!(t
+        .outputs
+        .iter()
+        .any(|o| o.role == Role::Change && o.script == w.from.script));
 }
 
 #[test]
@@ -324,7 +402,10 @@ fn legacy_chain_inputs_need_their_previous_transaction() {
         }],
     };
     let mut u = utxo_for(&from, 1, 0, 900_000_000);
-    u.outpoint = bitcoin::OutPoint { txid: prev.compute_txid(), vout: 0 };
+    u.outpoint = bitcoin::OutPoint {
+        txid: prev.compute_txid(),
+        vout: 0,
+    };
     let mk = |u: Utxo| BuildPlan {
         from: &from,
         to: &to,
@@ -332,10 +413,16 @@ fn legacy_chain_inputs_need_their_previous_transaction() {
         required: vec![],
         candidates: vec![u],
         payload: None,
-        fee: FeePolicy { rate_sat_per_kvb: 10_000, max_fee_sat: 50_000_000 },
+        fee: FeePolicy {
+            rate_sat_per_kvb: 10_000,
+            max_fee_sat: 50_000_000,
+        },
         fee_mode: FeeMode::SubtractFromAmount,
     };
-    assert_eq!(build_unsigned(&mk(u.clone())).unwrap_err(), Error::UnsupportedInputScript);
+    assert_eq!(
+        build_unsigned(&mk(u.clone())).unwrap_err(),
+        Error::UnsupportedInputScript
+    );
     let mut with_prev = u.clone();
     with_prev.prev_tx = Some(prev.clone());
     let t = build_unsigned(&mk(with_prev)).unwrap();
@@ -348,7 +435,10 @@ fn legacy_chain_inputs_need_their_previous_transaction() {
     p2.output[0].value = bitcoin::Amount::from_sat(1);
     lie.outpoint.txid = p2.compute_txid();
     lie.prev_tx = Some(p2);
-    assert_eq!(build_unsigned(&mk(lie)).unwrap_err(), Error::InputNotVerified);
+    assert_eq!(
+        build_unsigned(&mk(lie)).unwrap_err(),
+        Error::InputNotVerified
+    );
 }
 
 #[test]
@@ -369,7 +459,11 @@ fn conservation_holds_over_pseudo_random_cases() {
             .collect();
         let amount = 546 + next() % 3_000_000;
         let mut p = plan(&w, amount, cands);
-        p.fee_mode = if next() % 2 == 0 { FeeMode::SubtractFromAmount } else { FeeMode::ExtraOnTop };
+        p.fee_mode = if next() % 2 == 0 {
+            FeeMode::SubtractFromAmount
+        } else {
+            FeeMode::ExtraOnTop
+        };
         if let Ok(t) = build_unsigned(&p) {
             ok += 1;
             let tin = t.total_in().unwrap().sat();

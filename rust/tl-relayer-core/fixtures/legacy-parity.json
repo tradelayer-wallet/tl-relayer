@@ -1,0 +1,647 @@
+{
+  "pinned": {
+    "src/services/address.service.ts": "66b3d3305f197a514a53119ee27a0e6d38ebc3f6",
+    "src/routes/rpc.route.ts": "aa815103254e5b65837a521c7811f81900b24ef6",
+    "src/services/sochain.service.ts": "00addc7f25227177d3b88e78f76a3b6dcf5e86b7",
+    "src/services/watchonly-registry.service.ts": "e477f924e7d841cb86a38d19a326aafbb70ea0cd",
+    "src/services/tx.service.ts": "adc9ac05f8e19ddb0213729d72377c53757e5042",
+    "src/services/attestation.service.ts": "c895e76e8311adb8c520a22b4e0b6ead2686e3c1"
+  },
+  "generatedBy": "scripts/compare-legacy.cjs",
+  "cases": {
+    "listener_lookup": [
+      {
+        "in": "tl_getallbalancesforaddress",
+        "out": "tl_getAllBalancesForAddress"
+      },
+      {
+        "in": " TL_getInfo ",
+        "out": "tl_getInfo"
+      },
+      {
+        "in": "tl_decodetransaction",
+        "out": "tl_decodeTx"
+      },
+      {
+        "in": "tl_getsyncstatus",
+        "out": null
+      },
+      {
+        "in": "getblockchaininfo",
+        "out": null
+      },
+      {
+        "in": "",
+        "out": null
+      },
+      {
+        "in": "TL_GETCLEARLISTBYID",
+        "out": "tl_getClearlistById"
+      }
+    ],
+    "listener_body": [
+      {
+        "method": "tl_getattestations",
+        "params": [
+          "tltc1qexampleaddressexampleaddressexamplexyz",
+          7
+        ],
+        "out": {
+          "address": "tltc1qexampleaddressexampleaddressexamplexyz",
+          "id": 7
+        }
+      },
+      {
+        "method": "tl_getchannelcolumn",
+        "params": [
+          {
+            "channel": "c",
+            "myAddr": "m",
+            "cpAddr": "p"
+          }
+        ],
+        "out": {
+          "channelAddress": "c",
+          "newCommitAddress": "m",
+          "cpAddress": "p"
+        }
+      },
+      {
+        "method": "tl_getchannelcolumn",
+        "params": [
+          {
+            "channelAddress": "c1",
+            "buyerAddress": "b",
+            "cpAddress": "p1"
+          }
+        ],
+        "out": {
+          "channelAddress": "c1",
+          "newCommitAddress": "b",
+          "cpAddress": "p1"
+        }
+      },
+      {
+        "method": "tl_getchannelcolumn",
+        "params": [
+          "c",
+          "m",
+          "p"
+        ],
+        "out": {
+          "channelAddress": "c",
+          "newCommitAddress": "m",
+          "cpAddress": "p"
+        }
+      },
+      {
+        "method": "tl_gettransaction",
+        "params": [
+          "abcd"
+        ],
+        "out": {
+          "txid": "abcd"
+        }
+      },
+      {
+        "method": "tl_getclearlistbyid",
+        "params": [
+          4
+        ],
+        "out": {
+          "id": 4
+        }
+      },
+      {
+        "method": "tl_watchonly_register",
+        "params": [
+          {
+            "address": "tltc1qexampleaddressexampleaddressexamplexyz",
+            "pubKey": "k",
+            "network": "n"
+          }
+        ],
+        "out": {
+          "address": "tltc1qexampleaddressexampleaddressexamplexyz",
+          "pubkey": "k",
+          "network": "n"
+        }
+      },
+      {
+        "method": "tl_watchonly_utxos",
+        "params": [
+          {
+            "address": "tltc1qexampleaddressexampleaddressexamplexyz",
+            "pubkey": "k2"
+          }
+        ],
+        "out": {
+          "address": "tltc1qexampleaddressexampleaddressexamplexyz",
+          "pubkey": "k2"
+        }
+      },
+      {
+        "method": "tl_getinfo",
+        "params": [],
+        "out": {}
+      },
+      {
+        "method": "tl_getinfo",
+        "params": [
+          3
+        ],
+        "out": {
+          "params": 3
+        }
+      },
+      {
+        "method": "tl_getinfo",
+        "params": [
+          1,
+          2
+        ],
+        "out": {
+          "params": [
+            1,
+            2
+          ]
+        }
+      },
+      {
+        "method": "TL_GETBALANCE",
+        "params": [
+          "tltc1qexampleaddressexampleaddressexamplexyz",
+          5
+        ],
+        "out": {
+          "params": [
+            "tltc1qexampleaddressexampleaddressexamplexyz",
+            5
+          ]
+        }
+      }
+    ],
+    "listener_query": [
+      {
+        "method": "tl_contractposition",
+        "params": [
+          "tltc1qexampleaddressexampleaddressexamplexyz",
+          9
+        ],
+        "out": {
+          "address": "tltc1qexampleaddressexampleaddressexamplexyz",
+          "contractId": 9
+        }
+      },
+      {
+        "method": "tl_contractposition",
+        "params": [
+          {
+            "address": "tltc1qexampleaddressexampleaddressexamplexyz"
+          },
+          9
+        ],
+        "out": {
+          "address": "tltc1qexampleaddressexampleaddressexamplexyz",
+          "contractId": 9
+        }
+      },
+      {
+        "method": "tl_channelbalanceforcommiter",
+        "params": [
+          "tltc1qexampleaddressexampleaddressexamplexyz",
+          3
+        ],
+        "out": {
+          "address": "tltc1qexampleaddressexampleaddressexamplexyz",
+          "propertyId": 3
+        }
+      },
+      {
+        "method": "tl_getinitmargin",
+        "params": [
+          {
+            "contractId": 2,
+            "price": 1.5
+          }
+        ],
+        "out": {
+          "contractId": 2,
+          "price": 1.5
+        }
+      },
+      {
+        "method": "tl_getinitmargin",
+        "params": [
+          2,
+          1.5
+        ],
+        "out": {
+          "contractId": 2,
+          "price": 1.5
+        }
+      },
+      {
+        "method": "tl_getcontractinfo",
+        "params": [
+          {
+            "contractId": 8
+          }
+        ],
+        "out": {
+          "contractId": 8
+        }
+      },
+      {
+        "method": "tl_getmaxsynth",
+        "params": [
+          {
+            "address": "tltc1qexampleaddressexampleaddressexamplexyz",
+            "propertyId": 3
+          }
+        ],
+        "out": {
+          "address": "tltc1qexampleaddressexampleaddressexamplexyz",
+          "propId": 3
+        }
+      },
+      {
+        "method": "tl_getmaxsynth",
+        "params": [
+          "tltc1qexampleaddressexampleaddressexamplexyz",
+          4
+        ],
+        "out": {
+          "address": "tltc1qexampleaddressexampleaddressexamplexyz",
+          "propId": 4
+        }
+      },
+      {
+        "method": "tl_tokentradehistoryforaddress",
+        "params": [
+          1,
+          2,
+          "tltc1qexampleaddressexampleaddressexamplexyz"
+        ],
+        "out": {
+          "propertyId1": 1,
+          "propertyId2": 2,
+          "address": "tltc1qexampleaddressexampleaddressexamplexyz"
+        }
+      },
+      {
+        "method": "tl_contracttradehistoryforaddress",
+        "params": [
+          5,
+          "tltc1qexampleaddressexampleaddressexamplexyz"
+        ],
+        "out": {
+          "contractId": 5,
+          "address": "tltc1qexampleaddressexampleaddressexamplexyz"
+        }
+      },
+      {
+        "method": "tl_totaltradehistoryforaddress",
+        "params": [
+          "tltc1qexampleaddressexampleaddressexamplexyz"
+        ],
+        "out": {
+          "address": "tltc1qexampleaddressexampleaddressexamplexyz"
+        }
+      },
+      {
+        "method": "tl_getinfo",
+        "params": [
+          1
+        ],
+        "out": {}
+      }
+    ],
+    "public_methods": [
+      "tl_getstatesnapshot",
+      "tl_watchonly_register",
+      "tl_watchonly_utxos",
+      "tl_getsyncstatus",
+      "tl_getallbalancesforaddress",
+      "tl_getchannel",
+      "tl_getchannelcolumn",
+      "tl_getcontractinfo",
+      "tl_getattestations",
+      "tl_gettransaction",
+      "tl_getclearlistbyid",
+      "tl_listcontractseries",
+      "tl_getinitmargin",
+      "tl_channelbalanceforcommiter",
+      "tl_getmaxsynth",
+      "tl_contractposition",
+      "tl_tokentradehistoryforaddress",
+      "tl_contracttradehistoryforaddress",
+      "tl_totaltradehistoryforaddress",
+      "tl_getinfo",
+      "tl_getbalance",
+      "tl_getproperty",
+      "tl_listproperties",
+      "tl_createpayload_attestation",
+      "tl_createpayload_commit_tochannel"
+    ],
+    "normalize_method": [
+      {
+        "in": "  TL_X ",
+        "out": "tl_x"
+      },
+      {
+        "in": "",
+        "out": ""
+      },
+      {
+        "in": "tl_getinfo",
+        "out": "tl_getinfo"
+      },
+      {
+        "in": "ÄB",
+        "out": "äb"
+      }
+    ],
+    "first_funding": [
+      {
+        "utxos": [
+          {
+            "txid": "bb",
+            "confirmations": 5
+          },
+          {
+            "txid": "aa",
+            "confirmations": 5
+          },
+          {
+            "txid": "cc",
+            "confirmations": 1
+          },
+          {
+            "txid": "dd",
+            "confirmations": 0
+          }
+        ],
+        "height": 100,
+        "out": {
+          "firstFundingHeight": 96,
+          "firstFundingTxid": "aa"
+        }
+      },
+      {
+        "utxos": [
+          {
+            "txid": "x",
+            "confirmations": 500
+          }
+        ],
+        "height": 100,
+        "out": {
+          "firstFundingHeight": 0,
+          "firstFundingTxid": "x"
+        }
+      },
+      {
+        "utxos": [
+          {
+            "txid": "x",
+            "confirmations": 0
+          }
+        ],
+        "height": 100,
+        "out": {
+          "firstFundingHeight": null,
+          "firstFundingTxid": null
+        }
+      },
+      {
+        "utxos": [
+          {
+            "txid": "x",
+            "confirmations": 3
+          }
+        ],
+        "height": null,
+        "out": {
+          "firstFundingHeight": 0,
+          "firstFundingTxid": "x"
+        }
+      },
+      {
+        "utxos": [],
+        "height": 10,
+        "out": {
+          "firstFundingHeight": null,
+          "firstFundingTxid": null
+        }
+      }
+    ],
+    "rescan_start": [
+      {
+        "firstFundingHeight": 40,
+        "lastSnapshotHeight": 50,
+        "lastScannedHeight": 60,
+        "out": 40
+      },
+      {
+        "firstFundingHeight": null,
+        "lastSnapshotHeight": 50,
+        "lastScannedHeight": 20,
+        "out": 0
+      },
+      {
+        "firstFundingHeight": null,
+        "lastSnapshotHeight": null,
+        "lastScannedHeight": null,
+        "out": 0
+      },
+      {
+        "firstFundingHeight": 0,
+        "lastSnapshotHeight": 5,
+        "lastScannedHeight": 9,
+        "out": 0
+      },
+      {
+        "firstFundingHeight": 7,
+        "lastSnapshotHeight": null,
+        "lastScannedHeight": null,
+        "out": 0
+      }
+    ],
+    "legacy_selection": [
+      {
+        "utxos": [
+          {
+            "txid": "a",
+            "amount": 0.003
+          },
+          {
+            "txid": "b",
+            "amount": 0.01
+          },
+          {
+            "txid": "c",
+            "amount": 0.0005
+          },
+          {
+            "txid": "d",
+            "amount": 0.007
+          }
+        ],
+        "amount": 0.012,
+        "selected": [
+          "b",
+          "d"
+        ],
+        "legacyFee": 0.00001
+      },
+      {
+        "utxos": [
+          {
+            "txid": "a",
+            "amount": 0.3
+          },
+          {
+            "txid": "b",
+            "amount": 0.2
+          },
+          {
+            "txid": "c",
+            "amount": 0.15
+          }
+        ],
+        "amount": 0.45,
+        "selected": [
+          "a",
+          "b"
+        ],
+        "legacyFee": 0.00001
+      },
+      {
+        "utxos": [
+          {
+            "txid": "a",
+            "amount": 1
+          }
+        ],
+        "amount": 0.5,
+        "selected": [
+          "a"
+        ],
+        "legacyFee": 0.00001
+      }
+    ],
+    "legacy_inference": [
+      {
+        "in": "tltc1qx",
+        "out": "LTCTEST"
+      },
+      {
+        "in": "ltc1qx",
+        "out": "LTC"
+      },
+      {
+        "in": "tb1qx",
+        "out": "BTCTEST"
+      },
+      {
+        "in": "bcrt1qx",
+        "out": "BTC"
+      },
+      {
+        "in": "bc1qx",
+        "out": "BTC"
+      },
+      {
+        "in": "D8x",
+        "out": "BTC"
+      },
+      {
+        "in": "mxyz",
+        "out": "BTC"
+      }
+    ],
+    "safe_number": [
+      {
+        "in": 0.30000000000000004,
+        "decimals": 8,
+        "out": 0.3
+      },
+      {
+        "in": 1e-9,
+        "decimals": 8,
+        "out": 0
+      },
+      {
+        "in": 123456789.12345679,
+        "decimals": 8,
+        "out": 123456789.12345679
+      }
+    ],
+    "criminalip_country": [
+      {
+        "in": {
+          "location": {
+            "country": "gb"
+          }
+        },
+        "out": "GB"
+      },
+      {
+        "in": {
+          "country_code": " de "
+        },
+        "out": "DE"
+      },
+      {
+        "in": {
+          "whois": {
+            "data": [
+              {
+                "org_country_code": "se"
+              }
+            ]
+          }
+        },
+        "out": "SE"
+      },
+      {
+        "in": {
+          "summary": {
+            "country": "fr"
+          }
+        },
+        "out": "FR"
+      },
+      {
+        "in": {},
+        "out": "UNKNOWN"
+      }
+    ],
+    "normalize_ip": [
+      {
+        "in": "::ffff:203.0.113.5",
+        "out": "203.0.113.5"
+      },
+      {
+        "in": " 203.0.113.5 ",
+        "out": "203.0.113.5"
+      },
+      {
+        "in": "2001:db8::1",
+        "out": "2001:db8::1"
+      },
+      {
+        "in": "",
+        "out": ""
+      }
+    ],
+    "banned_countries": [
+      "US",
+      "KP",
+      "SD",
+      "RU",
+      "IR"
+    ]
+  }
+}
