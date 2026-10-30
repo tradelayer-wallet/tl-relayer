@@ -1,0 +1,12 @@
+[package]
+name = "tl-relayer-core"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.90"
+description = "Pure Rust contracts for the TradeLayer relayer: watch-only registry, address and unsigned-PSBT building, routed RPC policy, external UTXO validation, IP attestation"
+license = "ISC"
+publish = false
+
+[dependencies]
+bitcoin = { version = "0.32", default-features = false, features = ["std"] }
+serde_json = "1"
